@@ -61,8 +61,8 @@ export function WorkflowStepper() {
                 >
                   {isDone && <Check className="h-4 w-4 stroke-[3]" />}
                   {isActive && spinning && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isActive && !spinning && <span>{step.id}</span>}
-                  {isPending && <span>{step.id}</span>}
+                  {isActive && !spinning && <span className="h-2 w-2 rounded-full bg-primary-foreground" />}
+                  {isPending && <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />}
                 </div>
 
                 {/* Label */}
