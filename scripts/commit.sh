@@ -20,14 +20,33 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# ── load .env (optional) ─────────────────────────────────────────────────────
+# Only processes lines that match exactly: UPPER_VAR=value
+# Ignores comments, blank lines, and lines with special characters in the key.
+if [[ -f .env ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # must match IDENTIFIER=... (alphanumeric + underscore key, no spaces)
+    [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    value="${value%%#*}"                          # strip inline comments
+    value="${value//$'\r'/}"                      # strip Windows CR
+    value="${value#"${value%%[! ]*}"}"            # ltrim
+    value="${value%"${value##*[! ]}"}"            # rtrim
+    # env vars already in environment take precedence over .env
+    [[ -z "${!key+x}" ]] && declare "$key=$value"
+  done < .env
+fi
+
 # ── repo guard ───────────────────────────────────────────────────────────────
-EXPECTED_REPO="ai-code-builder-V2"
+# REPO_NAME can be set in .env; falls back to the actual directory name.
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) \
   || { echo -e "\033[0;31m[ERR]\033[0m  Not inside a git repository." >&2; exit 1; }
-REPO_NAME=$(basename "$REPO_ROOT")
-if [[ "$REPO_NAME" != "$EXPECTED_REPO" ]]; then
-  echo -e "\033[0;31m[ERR]\033[0m  Wrong repository: '$REPO_NAME'." >&2
-  echo -e "\033[0;31m[ERR]\033[0m  This script must run inside '$EXPECTED_REPO'." >&2
+ACTUAL_REPO=$(basename "$REPO_ROOT")
+EXPECTED_REPO="${REPO_NAME:-$ACTUAL_REPO}"   # if unset, skip guard (permissive)
+if [[ -n "${REPO_NAME:-}" && "$ACTUAL_REPO" != "$EXPECTED_REPO" ]]; then
+  echo -e "\033[0;31m[ERR]\033[0m  Wrong repository: '$ACTUAL_REPO'." >&2
+  echo -e "\033[0;31m[ERR]\033[0m  Expected '$EXPECTED_REPO' (set in .env)." >&2
   exit 1
 fi
 
@@ -42,9 +61,9 @@ error()   { echo -e "${RED}[ERR]${RESET}  $*" >&2; }
 header()  { echo -e "\n${BOLD}${CYAN}══ $* ══${RESET}"; }
 fail()    { error "$*"; exit 1; }
 
-# ── defaults ─────────────────────────────────────────────────────────────────
+# ── defaults (env vars from .env override built-in defaults) ─────────────────
 FEATURE_BRANCH=""
-MAIN_BRANCH="main"
+MAIN_BRANCH="${MAIN_BRANCH:-main}"   # .env MAIN_BRANCH > built-in default
 SKIP_VERIFY=false
 SKIP_MERGE=false
 COMMIT_MSG=""
