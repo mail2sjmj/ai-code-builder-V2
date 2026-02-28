@@ -21,9 +21,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # ── load .env (optional) ─────────────────────────────────────────────────────
-# Only processes lines that match exactly: UPPER_VAR=value
+# Precedence: backend/.env > .env (root)
+# Only processes lines that match exactly: IDENTIFIER=value
 # Ignores comments, blank lines, and lines with special characters in the key.
-if [[ -f .env ]]; then
+ENV_FILE=""
+[[ -f backend/.env ]] && ENV_FILE="backend/.env"
+[[ -f .env         ]] && ENV_FILE=".env"          # root .env wins if both exist
+if [[ -n "$ENV_FILE" ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     # must match IDENTIFIER=... (alphanumeric + underscore key, no spaces)
     [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
@@ -35,7 +39,7 @@ if [[ -f .env ]]; then
     value="${value%"${value##*[! ]}"}"            # rtrim
     # env vars already in environment take precedence over .env
     [[ -z "${!key+x}" ]] && declare "$key=$value"
-  done < .env
+  done < "$ENV_FILE"
 fi
 
 # ── repo guard ───────────────────────────────────────────────────────────────
