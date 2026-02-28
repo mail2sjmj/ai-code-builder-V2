@@ -334,6 +334,43 @@ def _log_dir(app_env: str) -> Path:
     return Path(tempfile.gettempdir()) / "code_builder_logs"
 
 
+# ── Generic .env reader ────────────────────────────────────────────────────────
+
+def _env_int(key: str, default: int) -> int:
+    """
+    Read an integer value from OS env or backend/.env file.
+    Priority: OS env-var → backend/.env → default.
+    """
+    from_env = os.environ.get(key, "").strip()
+    if from_env:
+        try:
+            return int(from_env)
+        except ValueError:
+            pass
+
+    env_file = BACKEND_DIR / ".env"
+    if env_file.exists():
+        raw_bytes = env_file.read_bytes()
+        for enc in ("utf-8-sig", "utf-16", "latin-1"):
+            try:
+                text = raw_bytes.decode(enc)
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+        else:
+            text = ""
+        for raw in text.splitlines():
+            line = raw.strip()
+            if line.startswith(f"{key}=") and not line.startswith("#"):
+                val = line.split("=", 1)[1].strip().split("#")[0].strip()
+                try:
+                    return int(val)
+                except ValueError:
+                    pass
+
+    return default
+
+
 # ── Uvicorn command builder ────────────────────────────────────────────────────
 
 def _uvicorn_cmd(python: Path, port: int, app_env: str) -> list[str]:
@@ -439,8 +476,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     _info(f"Backend spawned (PID {proc.pid}). Waiting for health check…")
 
     health_url = f"http://localhost:{port}/health"
-    for attempt in range(20):
-        time.sleep(1)
+    retries  = _env_int("HEALTH_CHECK_RETRIES", 20)
+    interval = _env_int("HEALTH_CHECK_INTERVAL_SECONDS", 1)
+    for attempt in range(retries):
         try:
             with urllib.request.urlopen(health_url, timeout=2) as resp:
                 if resp.status == 200:
@@ -448,7 +486,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                     _ok(f"Logs → {log_file}")
                     break
         except (urllib.error.URLError, OSError):
-            print(f"    [{attempt + 1:02d}/20] Waiting…", end="\r", flush=True)
+            print(f"    [{attempt + 1:02d}/{retries}] Waiting…", end="\r", flush=True)
+            time.sleep(interval)
     else:
         print()
         _err("Backend did not respond to health checks. Check the log file:")
