@@ -1,13 +1,11 @@
 import { useRef, useState, type DragEvent } from 'react'
-import { CheckCircle2, Clock, FileSpreadsheet, UploadCloud } from 'lucide-react'
+import { CheckCircle2, Clock, FileSpreadsheet, HelpCircle, UploadCloud, X } from 'lucide-react'
 import { useFileUpload } from '@/hooks/useFileUpload'
 import { validateFile } from '@/utils/fileValidation'
 import { toastError } from '@/utils/toast'
 import { cn } from '@/lib/utils'
-import { FileMetadataCard } from './FileMetadataCard'
-import { useSessionStore } from '@/store/sessionStore'
 
-type UploadMode = 'file' | 'file-with-meta'
+type FileWithDataMetaMode = 'file-including-metadata' | 'data-file-excluding-metadata'
 
 // ── Shared toggle switch ──────────────────────────────────────────────────────
 
@@ -49,12 +47,14 @@ function DropZoneBox({
   status = 'idle',
   uploadProgress = 0,
   selectedFile,
+  compact = false,
 }: {
   label: string
   onFile: (file: File) => void
   status?: DropZoneStatus
   uploadProgress?: number
   selectedFile?: File | null
+  compact?: boolean
 }) {
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -70,7 +70,7 @@ function DropZoneBox({
 
   return (
     <div className="flex flex-col gap-2">
-      {label && <p className="text-sm font-semibold text-foreground">{label}</p>}
+      {label && <p className="text-xs font-semibold text-foreground">{label}</p>}
 
       <div
         onDrop={onDrop}
@@ -78,7 +78,8 @@ function DropZoneBox({
         onDragLeave={() => setIsDragging(false)}
         onClick={() => !isDisabled && inputRef.current?.click()}
         className={cn(
-          'relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 transition-all duration-200',
+          'relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all duration-200',
+          compact ? 'gap-2 p-5' : 'gap-3 p-8',
           isDragging
             ? 'scale-[1.01] border-primary bg-primary/5'
             : status === 'ready'
@@ -134,14 +135,14 @@ function DropZoneBox({
         ) : (
           <>
             <UploadCloud
-              className={cn('h-10 w-10', isDragging ? 'text-primary' : 'text-muted-foreground')}
+              className={cn(compact ? 'h-8 w-8' : 'h-10 w-10', isDragging ? 'text-primary' : 'text-muted-foreground')}
             />
-            <p className="text-center text-sm font-medium">
-              Drop a CSV or XLSX file here
+            <p className={cn('text-center font-medium', compact ? 'text-xs leading-snug' : 'text-sm')}>
+              {compact ? 'Drop CSV or XLSX here' : 'Drop a CSV or XLSX file here'}
               <br />
               <span className="text-muted-foreground">or click to browse</span>
             </p>
-            <p className="text-xs text-muted-foreground">Maximum file size: 50 MB</p>
+            <p className={cn('text-muted-foreground', compact ? 'text-[11px]' : 'text-xs')}>Maximum file size: 50 MB</p>
           </>
         )}
       </div>
@@ -152,28 +153,19 @@ function DropZoneBox({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function FileUploadZone() {
-  const [uploadMode, setUploadMode] = useState<UploadMode>('file')
-
-  // "Upload File with Meta" — header options
-  const [metaOption, setMetaOption] = useState<'first-row-header' | 'header-position' | null>(null)
-  const [headerPosition, setHeaderPosition] = useState('')
-
-  // "Upload File" — optional separate metadata file
-  const [wantMetadata, setWantMetadata] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
+  const [helpPopupPos, setHelpPopupPos] = useState<{ top: number; left: number; pointerTop: number } | null>(null)
+  const helpBtnRef = useRef<HTMLButtonElement | null>(null)
+  const [fileWithDataMetaMode, setFileWithDataMetaMode] = useState<FileWithDataMetaMode>('file-including-metadata')
+  const [headerPosition, setHeaderPosition] = useState('1')
   const [dataFile, setDataFile] = useState<File | null>(null)
   const [metaFile, setMetaFile] = useState<File | null>(null)
 
   const { uploadFile, isPending, uploadProgress } = useFileUpload()
-  const hasSession = useSessionStore((s) => !!s.sessionId)
 
   const resolveHeaderRow = (): number | undefined => {
-    if (uploadMode !== 'file-with-meta') return undefined
-    if (metaOption === 'first-row-header') return 1
-    if (metaOption === 'header-position') {
-      const n = parseInt(headerPosition, 10)
-      return Number.isFinite(n) && n >= 1 ? n : undefined
-    }
-    return undefined
+    const n = parseInt(headerPosition, 10)
+    return Number.isFinite(n) && n >= 1 ? n : 1
   }
 
   // Called when the data file is dropped/selected
@@ -181,7 +173,7 @@ export function FileUploadZone() {
     const validation = validateFile(file)
     if (!validation.valid) { toastError(validation.error ?? 'Invalid file.'); return }
 
-    if (wantMetadata) {
+    if (fileWithDataMetaMode === 'data-file-excluding-metadata') {
       // Store and wait; if meta is already ready, process immediately
       setDataFile(file)
       if (metaFile) uploadFile({ file, metaFile })
@@ -203,110 +195,116 @@ export function FileUploadZone() {
   // Derive zone visual status for the data drop zone
   const dataZoneStatus = (): DropZoneStatus => {
     if (isPending) return 'uploading'
-    if (dataFile && !metaFile) return 'waiting'
-    if (dataFile && metaFile) return 'ready'
+    if (fileWithDataMetaMode === 'data-file-excluding-metadata' && dataFile && !metaFile) return 'waiting'
+    if (fileWithDataMetaMode === 'data-file-excluding-metadata' && dataFile && metaFile) return 'ready'
     return 'idle'
+  }
+
+  const toggleHelp = () => {
+    if (showHelp) {
+      setShowHelp(false)
+      return
+    }
+    const rect = helpBtnRef.current?.getBoundingClientRect()
+    if (!rect) {
+      setShowHelp(true)
+      return
+    }
+    const popupWidth = 288
+    const popupHeightEstimate = 170
+    // Keep bubble to the right of the icon so it doesn't cover the options stack.
+    const left = Math.min(rect.right + 6, window.innerWidth - popupWidth - 12)
+    const top = Math.max(12, Math.min(rect.top - 14, window.innerHeight - popupHeightEstimate - 12))
+    // Pointer sits on left edge, aligned as close to icon center as possible.
+    const iconCenterY = rect.top + rect.height / 2
+    const pointerTop = Math.max(14, Math.min(popupHeightEstimate - 14, iconCenterY - top))
+    setHelpPopupPos({
+      left,
+      top,
+      pointerTop,
+    })
+    setShowHelp(true)
   }
 
   return (
     <div className="space-y-4">
-      {/* Uploaded file summary */}
-      {hasSession && <FileMetadataCard />}
-
-      {/* Upload mode radio buttons */}
-      <div className="flex items-center gap-6">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="radio"
-            name="uploadMode"
-            value="file-with-meta"
-            checked={uploadMode === 'file-with-meta'}
-            onChange={() => setUploadMode('file-with-meta')}
-            className="h-4 w-4 accent-primary"
-          />
-          <span className="text-sm font-medium">Upload File with Meta</span>
-        </label>
-
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="radio"
-            name="uploadMode"
-            value="file"
-            checked={uploadMode === 'file'}
-            onChange={() => setUploadMode('file')}
-            className="h-4 w-4 accent-primary"
-          />
-          <span className="text-sm font-medium">Upload File</span>
-        </label>
-      </div>
-
-      {/* "Upload File with Meta" — header options */}
-      {uploadMode === 'file-with-meta' && (
-        <div className="flex flex-wrap items-center gap-6 rounded-lg border bg-muted/30 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-foreground">First Row Header</span>
-            <Toggle
-              checked={metaOption === 'first-row-header'}
-              onChange={() =>
-                setMetaOption((prev) => (prev === 'first-row-header' ? null : 'first-row-header'))
-              }
-            />
-          </div>
-
-          <div className="h-5 w-px bg-border" />
-
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-foreground">Header Record Position</span>
-            <Toggle
-              checked={metaOption === 'header-position'}
-              onChange={() =>
-                setMetaOption((prev) => (prev === 'header-position' ? null : 'header-position'))
-              }
-            />
-            {metaOption === 'header-position' && (
-              <input
-                type="number"
-                min={1}
-                value={headerPosition}
-                onChange={(e) => setHeaderPosition(e.target.value)}
-                placeholder="Row #"
-                className="w-20 rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            )}
+      {/* Primary mode options */}
+      <div className="space-y-2 rounded-lg border bg-muted/30 px-3 py-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Upload Mode</p>
+          <div className="relative">
+            <button
+              ref={helpBtnRef}
+              type="button"
+              onClick={toggleHelp}
+              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Upload mode help"
+              title="Help"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </button>
           </div>
         </div>
-      )}
-
-      {/* "Upload File" — optional metadata toggle */}
-      {uploadMode === 'file' && (
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-foreground">Want to upload Metadata?</span>
+        <div className="flex items-center gap-2.5">
           <Toggle
-            checked={wantMetadata}
+            checked={fileWithDataMetaMode === 'file-including-metadata'}
             onChange={(v) => {
-              setWantMetadata(v)
+              if (!v) return
+              setFileWithDataMetaMode('file-including-metadata')
               setDataFile(null)
               setMetaFile(null)
             }}
           />
+          <span className="text-xs font-medium text-foreground leading-tight">Data File with Metadata</span>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <Toggle
+            checked={fileWithDataMetaMode === 'data-file-excluding-metadata'}
+            onChange={(v) => {
+              if (!v) return
+              setFileWithDataMetaMode('data-file-excluding-metadata')
+              setDataFile(null)
+              setMetaFile(null)
+            }}
+          />
+          <span className="text-xs font-medium text-foreground leading-tight">Data file without Metadata</span>
+        </div>
+      </div>
+
+      {/* File including Metadata options */}
+      {fileWithDataMetaMode === 'file-including-metadata' && (
+        <div className="space-y-2 rounded-lg border bg-muted/30 px-3 py-3">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-medium text-foreground leading-tight">Metadata Position</span>
+          <input
+            type="number"
+            min={1}
+            value={headerPosition}
+            onChange={(e) => setHeaderPosition(e.target.value)}
+            placeholder="Row #"
+              className="w-16 rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          </div>
         </div>
       )}
 
       {/* Drop zone(s) */}
-      {uploadMode === 'file' && wantMetadata ? (
-        <div className="grid grid-cols-2 gap-4">
+      {fileWithDataMetaMode === 'data-file-excluding-metadata' ? (
+        <div className="grid grid-cols-1 gap-3">
           <DropZoneBox
-            label="File Upload"
+            label="Data File"
             onFile={handleDataFile}
             status={dataZoneStatus()}
             uploadProgress={uploadProgress}
             selectedFile={dataFile}
+            compact
           />
           <DropZoneBox
-            label="Meta Upload"
+            label="Metadata File"
             onFile={handleMetaFile}
             status={metaFile ? 'ready' : 'idle'}
             selectedFile={metaFile}
+            compact
           />
         </div>
       ) : (
@@ -317,6 +315,43 @@ export function FileUploadZone() {
           uploadProgress={uploadProgress}
         />
       )}
+
+      {showHelp && helpPopupPos && (
+        <div
+          className="fixed z-40 w-72 origin-left rounded-lg border border-indigo-400/70 bg-background p-3 shadow-lg ring-1 ring-blue-400/30 transition-all duration-150 ease-out"
+          style={{
+            top: `${helpPopupPos.top}px`,
+            left: `${helpPopupPos.left}px`,
+            transform: showHelp ? 'scale(1) translateX(0)' : 'scale(0.96) translateX(-4px)',
+            opacity: showHelp ? 1 : 0,
+          }}
+        >
+          <span
+            className="absolute -left-2 h-4 w-4 -translate-y-1/2 rotate-45 border-l-2 border-b-2 border-indigo-400/70 bg-background"
+            style={{ top: `${helpPopupPos.pointerTop}px` }}
+          />
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-foreground">Upload Mode Help</h3>
+            <button
+              type="button"
+              onClick={() => setShowHelp(false)}
+              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Close help"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <ul className="list-disc space-y-2 pl-4 text-[11px] text-muted-foreground">
+            <li>
+              Choose <span className="font-semibold text-foreground">Data File with Metadata</span> when your file already contains header metadata in a row.
+            </li>
+            <li>
+              Choose <span className="font-semibold text-foreground">Data file without Metadata</span> when metadata is provided in a separate file upload.
+            </li>
+          </ul>
+        </div>
+      )}
+
     </div>
   )
 }

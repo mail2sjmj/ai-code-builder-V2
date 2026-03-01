@@ -371,6 +371,53 @@ def _env_int(key: str, default: int) -> int:
     return default
 
 
+def _detect_app_env() -> str:
+    """Read APP_ENV from OS env or backend/.env selector file, defaulting to 'development'."""
+    from_env = os.environ.get("APP_ENV", "").strip()
+    if from_env:
+        return from_env
+    env_file = BACKEND_DIR / ".env"
+    if env_file.exists():
+        try:
+            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if line.startswith("APP_ENV=") and not line.startswith("#"):
+                    val = line.split("=", 1)[1].strip().split("#")[0].strip()
+                    if val:
+                        return val
+        except OSError:
+            pass
+    return "development"
+
+
+def _check_env_files() -> bool:
+    """
+    Verify that required .env files exist for both backend and frontend.
+    Prints a status line for each file. Returns True if all required files are present.
+    """
+    app_env = _detect_app_env()
+    _info(f"APP_ENV  : {app_env}")
+
+    checks = [
+        # (path,                                   required, display label)
+        (BACKEND_DIR / f".env.{app_env}",  True,  f"backend/.env.{app_env}"),
+        (FRONTEND_DIR / ".env",            True,  "frontend/.env"),
+        (BACKEND_DIR / ".env",             False, "backend/.env  (APP_ENV selector — optional)"),
+    ]
+
+    all_ok = True
+    for path, required, label in checks:
+        if path.exists():
+            _ok(f"Found    : {label}")
+        elif required:
+            _err(f"Missing  : {label}  ← REQUIRED")
+            all_ok = False
+        else:
+            _warn(f"Missing  : {label}")
+
+    return all_ok
+
+
 # ── Uvicorn command builder ────────────────────────────────────────────────────
 
 def _uvicorn_cmd(python: Path, port: int, app_env: str) -> list[str]:
@@ -652,9 +699,17 @@ def cmd_restart(args: argparse.Namespace) -> int:
 
 def cmd_health(args: argparse.Namespace) -> int:
     _header("Health Check")
+
+    # ── Env file verification ─────────────────────────────────────────────────
+    _header("Env Files")
+    env_ok = _check_env_files()
+
+    # ── HTTP health endpoint ──────────────────────────────────────────────────
+    _header("Backend")
     url = args.url or f"http://localhost:{args.port}/health"
     _info(f"GET {url}")
 
+    http_rc = 0
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:
             body = json.loads(resp.read())
@@ -664,15 +719,16 @@ def cmd_health(args: argparse.Namespace) -> int:
             _ok(f"inbound : {body.get('inbound_dir', '?')}")
             _ok(f"temp    : {body.get('temp_dir', '?')}")
             _ok(f"logs    : {body.get('log_dir', '?')}")
-            return 0
     except urllib.error.HTTPError as exc:
         _err(f"HTTP {exc.code}: {exc.reason}")
-        return 1
+        http_rc = 1
     except (urllib.error.URLError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
         _err(f"Could not reach {url}: {reason}")
         _warn("Is the backend running? Try:  python scripts/manage.py status")
-        return 2
+        http_rc = 2
+
+    return http_rc if http_rc != 0 else (0 if env_ok else 3)
 
 
 # ── status ─────────────────────────────────────────────────────────────────────
@@ -740,10 +796,10 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Stop only the backend, leave the frontend running")
     pp.add_argument("--port", type=int, default=8000, metavar="PORT",
                     help="Backend port to scan for stray processes (default: 8000)")
-    pp.add_argument("--force", action="store_true",
-                    help="Skip graceful shutdown and force-kill immediately")
-    pp.add_argument("--purge-cache", action="store_true",
-                    help="Also delete all backend __pycache__ dirs after stopping")
+    pp.add_argument("--force", action="store_true", default=True,
+                    help="Skip graceful shutdown and force-kill immediately (default: on)")
+    pp.add_argument("--purge-cache", action="store_true", default=True,
+                    help="Also delete all backend __pycache__ dirs after stopping (default: on)")
 
     # health
     ph = sub.add_parser("health", help="Check the backend /health endpoint")

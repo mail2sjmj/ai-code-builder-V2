@@ -19,7 +19,7 @@ export function CodeGenPanel() {
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">Generated Python Code</span>
+          <span className="text-sm font-semibold">Code Genie - Source Console</span>
           <StatusBadge status={status} />
         </div>
         <div className="flex items-center gap-2">

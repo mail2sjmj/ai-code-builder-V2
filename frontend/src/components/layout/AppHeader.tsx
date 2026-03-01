@@ -6,7 +6,7 @@ export function AppHeader() {
   const env = import.meta.env.MODE
 
   return (
-    <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur-sm shadow-sm">
+    <header className="border-b bg-background/95 backdrop-blur-sm shadow-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         {/* Left spacer for visual balance */}
         <div className="w-48 flex items-center gap-2">
@@ -24,7 +24,7 @@ export function AppHeader() {
               Code Genie
             </span>
             <span className="mx-2 text-muted-foreground/50 font-light">—</span>
-            <span className="text-foreground">AI Code Builder</span>
+            <span className="text-foreground">Intelligent Code Studio</span>
           </h1>
           <p className="mt-0.5 text-[11px] font-medium tracking-[0.18em] uppercase text-muted-foreground/70">
             Intelligent · Automated · Precise
