@@ -13,3 +13,13 @@ class UploadResponse(BaseModel):
     columns: list[str]
     dtypes: dict[str, str]
     file_size_bytes: int
+
+
+class MetadataPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str
+    column_count: int
+    columns: list[str]
+    dtypes: dict[str, str]
+    file_size_bytes: int

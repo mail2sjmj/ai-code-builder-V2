@@ -63,7 +63,7 @@ async def stream_code_generation(
 
     # Load sample data for context
     try:
-        df_sample = pd.read_parquet(session.parquet_path).head(3)
+        df_sample = pd.read_parquet(session.parquet_path).head(settings.CODEGEN_SAMPLE_ROWS)
         sample_data_json = json.dumps(df_sample.to_dict(orient="records"), default=str, indent=2)
     except Exception as exc:
         logger.warning("Could not load sample data: %s", exc)
@@ -77,6 +77,7 @@ async def stream_code_generation(
         filename=session.filename,
         row_count=session.row_count,
         column_schema_detailed=column_schema_detailed,
+        sample_row_count=settings.CODEGEN_SAMPLE_ROWS,
         sample_data_json=sample_data_json,
     )
 

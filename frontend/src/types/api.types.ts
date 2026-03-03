@@ -10,6 +10,14 @@ export interface UploadResponse {
   file_size_bytes: number
 }
 
+export interface MetadataPreviewResponse {
+  filename: string
+  column_count: number
+  columns: string[]
+  dtypes: Record<string, string>
+  file_size_bytes: number
+}
+
 export interface FileMetadata {
   filename: string
   rowCount: number
@@ -37,4 +45,25 @@ export interface ApiError {
   error_code: string
   message: string
   fields?: unknown[]
+}
+
+export interface SaveCodeLibraryRequest {
+  code: string
+  label: string
+  visibility: 'public' | 'private'
+}
+
+export interface SaveCodeLibraryResponse {
+  saved_in: Array<'public' | 'private'>
+  filenames: string[]
+}
+
+export interface CodeLibraryItem {
+  filename: string
+  updated_at: string
+}
+
+export interface CodeLibraryListResponse {
+  visibility: 'public' | 'private'
+  items: CodeLibraryItem[]
 }

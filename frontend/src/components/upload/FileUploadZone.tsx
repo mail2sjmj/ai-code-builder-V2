@@ -1,11 +1,14 @@
-import { useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { CheckCircle2, Clock, FileSpreadsheet, HelpCircle, UploadCloud, X } from 'lucide-react'
+import appConfig from '@/config/app.config'
 import { useFileUpload } from '@/hooks/useFileUpload'
+import { useSessionStore } from '@/store/sessionStore'
 import { validateFile } from '@/utils/fileValidation'
-import { toastError } from '@/utils/toast'
+import { toastError, toastSuccess } from '@/utils/toast'
 import { cn } from '@/lib/utils'
+import type { MetadataPreviewResponse } from '@/types/api.types'
 
-type FileWithDataMetaMode = 'file-including-metadata' | 'data-file-excluding-metadata'
+type FileWithDataMetaMode = 'file-including-metadata' | 'data-file-excluding-metadata' | 'only-metadata'
 
 // ── Shared toggle switch ──────────────────────────────────────────────────────
 
@@ -160,8 +163,22 @@ export function FileUploadZone() {
   const [headerPosition, setHeaderPosition] = useState('1')
   const [dataFile, setDataFile] = useState<File | null>(null)
   const [metaFile, setMetaFile] = useState<File | null>(null)
+  const [metadataOnlyFile, setMetadataOnlyFile] = useState<File | null>(null)
+  const [sampleRowCount, setSampleRowCount] = useState(String(appConfig.upload.metadataSampleDefaultRows))
+  const [isGeneratingSample, setIsGeneratingSample] = useState(false)
+  const [isPreviewingMetadata, setIsPreviewingMetadata] = useState(false)
+  const [sampleDownloadUrl, setSampleDownloadUrl] = useState<string | null>(null)
+  const [sampleDownloadName, setSampleDownloadName] = useState('metadata_sample.csv')
+  const [sampleGenerated, setSampleGenerated] = useState(false)
 
-  const { uploadFile, isPending, uploadProgress } = useFileUpload()
+  const { uploadFile, uploadFileAsync, isPending, uploadProgress } = useFileUpload()
+  const setFileMetadata = useSessionStore((s) => s.setFileMetadata)
+
+  useEffect(() => {
+    return () => {
+      if (sampleDownloadUrl) URL.revokeObjectURL(sampleDownloadUrl)
+    }
+  }, [sampleDownloadUrl])
 
   const resolveHeaderRow = (): number | undefined => {
     const n = parseInt(headerPosition, 10)
@@ -190,6 +207,137 @@ export function FileUploadZone() {
     setMetaFile(file)
     // If data file is already staged, both are ready — process now
     if (dataFile) uploadFile({ file: dataFile, metaFile: file })
+  }
+
+  const handleMetadataOnlyFile = async (file: File) => {
+    const validation = validateFile(file)
+    if (!validation.valid) { toastError(validation.error ?? 'Invalid file.'); return }
+    setMetadataOnlyFile(file)
+    setSampleGenerated(false)
+    if (sampleDownloadUrl) {
+      URL.revokeObjectURL(sampleDownloadUrl)
+      setSampleDownloadUrl(null)
+    }
+    setSampleDownloadName('metadata_sample.csv')
+    setIsPreviewingMetadata(true)
+    try {
+      const formData = new FormData()
+      formData.append('meta_file', file)
+      const response = await fetch(
+        `${appConfig.api.baseUrl}${appConfig.api.prefix}/upload/metadata-preview`,
+        { method: 'POST', body: formData },
+      )
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { message?: string }
+        throw new Error(body.message ?? `Failed to parse metadata: HTTP ${response.status}`)
+      }
+      const data = (await response.json()) as MetadataPreviewResponse
+      setFileMetadata({
+        filename: data.filename,
+        rowCount: 0,
+        columnCount: data.column_count,
+        columns: data.columns,
+        dtypes: data.dtypes,
+        fileSizeBytes: data.file_size_bytes,
+      })
+      toastSuccess(`Metadata loaded: ${data.column_count} columns`)
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : 'Failed to parse metadata.')
+    } finally {
+      setIsPreviewingMetadata(false)
+    }
+  }
+
+  const requestSampleData = async (format: 'csv' | 'xlsx'): Promise<{ blob: Blob; filename: string }> => {
+    if (!metadataOnlyFile) throw new Error('Select a metadata file first.')
+    const rowCount = parseInt(sampleRowCount, 10)
+    const maxRows = appConfig.upload.metadataSampleMaxRows
+    if (!Number.isFinite(rowCount) || rowCount < 1 || rowCount > maxRows) {
+      throw new Error(`Row count must be between 1 and ${maxRows}.`)
+    }
+    const formData = new FormData()
+    formData.append('meta_file', metadataOnlyFile)
+    formData.append('row_count', String(rowCount))
+    formData.append('output_format', format)
+
+    const response = await fetch(
+      `${appConfig.api.baseUrl}${appConfig.api.prefix}/upload/metadata-sample`,
+      { method: 'POST', body: formData },
+    )
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { message?: string }
+      throw new Error(body.message ?? `Failed to generate sample data: HTTP ${response.status}`)
+    }
+
+    const blob = await response.blob()
+    const disposition = response.headers.get('content-disposition') ?? ''
+    const filenameMatch = disposition.match(/filename\*?=(?:UTF-8''|")?([^\";]+)/i)
+    const filename = filenameMatch?.[1]?.trim() || `metadata_sample_${rowCount}.${format}`
+    return { blob, filename }
+  }
+
+  const generateSampleData = async () => {
+    if (!metadataOnlyFile || isGeneratingSample) return
+    setIsGeneratingSample(true)
+    try {
+      const { blob, filename } = await requestSampleData('csv')
+      const generatedFile = new File([blob], filename, { type: 'text/csv' })
+      await uploadFileAsync({ file: generatedFile, headerRow: 1 })
+      if (sampleDownloadUrl) URL.revokeObjectURL(sampleDownloadUrl)
+      const objectUrl = URL.createObjectURL(blob)
+      setSampleDownloadUrl(objectUrl)
+      setSampleDownloadName(filename)
+      setSampleGenerated(true)
+      toastSuccess('Sample CSV generated and set as active input file.')
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : 'Failed to generate sample data.')
+    } finally {
+      setIsGeneratingSample(false)
+    }
+  }
+
+  const downloadSampleXlsx = async () => {
+    if (!metadataOnlyFile || !sampleGenerated || isGeneratingSample || isPreviewingMetadata) return
+    setIsGeneratingSample(true)
+    try {
+      const { blob, filename } = await requestSampleData('xlsx')
+      const objectUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      document.body.removeChild(anchor)
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      toastSuccess('Sample XLSX downloaded.')
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : 'Failed to download XLSX sample.')
+    } finally {
+      setIsGeneratingSample(false)
+    }
+  }
+
+  const downloadMetadataTemplate = () => {
+    const columns = [
+      'Attribute Name',
+      'Attribute Type',
+      'Attribute Length',
+      'Precision',
+      'Scale',
+      'Valid Values',
+      'Sample Data',
+      'Comments',
+    ]
+    const csv = `${columns.join(',')}\n`
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = 'metadata_template.csv'
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
   }
 
   // Derive zone visual status for the data drop zone
@@ -253,6 +401,9 @@ export function FileUploadZone() {
               setFileWithDataMetaMode('file-including-metadata')
               setDataFile(null)
               setMetaFile(null)
+              setMetadataOnlyFile(null)
+              setSampleGenerated(false)
+              setFileMetadata(null)
             }}
           />
           <span className="text-xs font-medium text-foreground leading-tight">Data File with Metadata</span>
@@ -265,9 +416,27 @@ export function FileUploadZone() {
               setFileWithDataMetaMode('data-file-excluding-metadata')
               setDataFile(null)
               setMetaFile(null)
+              setMetadataOnlyFile(null)
+              setSampleGenerated(false)
+              setFileMetadata(null)
             }}
           />
           <span className="text-xs font-medium text-foreground leading-tight">Data file without Metadata</span>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <Toggle
+            checked={fileWithDataMetaMode === 'only-metadata'}
+            onChange={(v) => {
+              if (!v) return
+              setFileWithDataMetaMode('only-metadata')
+              setDataFile(null)
+              setMetaFile(null)
+              setMetadataOnlyFile(null)
+              setSampleGenerated(false)
+              setFileMetadata(null)
+            }}
+          />
+          <span className="text-xs font-medium text-foreground leading-tight">Only Metadata</span>
         </div>
       </div>
 
@@ -306,6 +475,87 @@ export function FileUploadZone() {
             selectedFile={metaFile}
             compact
           />
+        </div>
+      ) : fileWithDataMetaMode === 'only-metadata' ? (
+        <div className="flex flex-col gap-3">
+          <div className="space-y-2 rounded-lg border bg-muted/30 px-3 py-3">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-medium text-foreground leading-tight">Sample Row Count</span>
+              <input
+                type="number"
+                min={1}
+                max={appConfig.upload.metadataSampleMaxRows}
+                value={sampleRowCount}
+                onChange={(e) => setSampleRowCount(e.target.value)}
+                className="w-20 rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Allowed range: 1 to {appConfig.upload.metadataSampleMaxRows}
+            </p>
+          </div>
+          <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <span className="truncate text-xs font-semibold text-foreground">Metadata File</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={downloadMetadataTemplate}
+                className="rounded border border-border bg-background px-2 py-1 text-[10px] font-semibold leading-none text-foreground hover:bg-muted"
+              >
+                Template
+              </button>
+              <button
+                type="button"
+                onClick={() => void generateSampleData()}
+                disabled={!metadataOnlyFile || isGeneratingSample || isPreviewingMetadata}
+                className="rounded border border-border bg-background px-2 py-1 text-[10px] font-semibold leading-none text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Re-generate
+              </button>
+            </div>
+          </div>
+          <DropZoneBox
+            label=""
+            onFile={handleMetadataOnlyFile}
+            status={isPreviewingMetadata ? 'uploading' : metadataOnlyFile ? 'ready' : 'idle'}
+            uploadProgress={isPreviewingMetadata ? 100 : 0}
+            selectedFile={metadataOnlyFile}
+            compact
+          />
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => void generateSampleData()}
+              disabled={!metadataOnlyFile || isGeneratingSample || isPreviewingMetadata}
+              className="flex-1 rounded-lg bg-primary px-2 py-2 text-xs font-medium leading-tight text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isGeneratingSample ? 'Generating...' : 'Generate Sample Data'}
+            </button>
+            <button
+              type="button"
+              disabled={!sampleDownloadUrl}
+              onClick={() => {
+                if (!sampleDownloadUrl) return
+                const anchor = document.createElement('a')
+                anchor.href = sampleDownloadUrl
+                anchor.download = sampleDownloadName
+                document.body.appendChild(anchor)
+                anchor.click()
+                document.body.removeChild(anchor)
+              }}
+              className="flex-1 rounded-lg border border-border bg-background px-2 py-2 text-xs font-medium leading-tight text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Download Sample file(.csv)
+            </button>
+            <button
+              type="button"
+              onClick={() => void downloadSampleXlsx()}
+              disabled={!sampleGenerated || isGeneratingSample || isPreviewingMetadata}
+              className="flex-1 rounded-lg border border-border bg-background px-2 py-2 text-xs font-medium leading-tight text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Download Sample file(.xlsx)
+            </button>
+          </div>
         </div>
       ) : (
         <DropZoneBox
@@ -347,6 +597,9 @@ export function FileUploadZone() {
             </li>
             <li>
               Choose <span className="font-semibold text-foreground">Data file without Metadata</span> when metadata is provided in a separate file upload.
+            </li>
+            <li>
+              Choose <span className="font-semibold text-foreground">Only Metadata</span> to generate a 100-row sample CSV from metadata headers only.
             </li>
           </ul>
         </div>

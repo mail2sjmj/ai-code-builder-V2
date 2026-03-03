@@ -62,7 +62,7 @@ Dataset Schema:
 - Columns:
 {column_schema_detailed}
 
-Sample data (first 3 rows as JSON):
+Sample data (first {sample_row_count} rows as JSON):
 {sample_data_json}
 ---
 

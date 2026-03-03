@@ -7,6 +7,8 @@ const appConfig = {
   },
   upload: {
     maxFileSizeMb: Number(import.meta.env.VITE_MAX_UPLOAD_SIZE_MB ?? 50),
+    metadataSampleDefaultRows: Number(import.meta.env.VITE_METADATA_SAMPLE_DEFAULT_ROWS ?? 100),
+    metadataSampleMaxRows: Number(import.meta.env.VITE_METADATA_SAMPLE_MAX_ROWS ?? 5000),
     allowedExtensions: ['.csv', '.xlsx'] as string[],
     allowedMimeTypes: [
       'text/csv',

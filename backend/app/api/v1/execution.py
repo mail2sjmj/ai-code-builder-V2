@@ -3,14 +3,14 @@
 import logging
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
 
 from app.api.dependencies import deps_session_store, deps_settings
 from app.config.settings import Settings
 from app.schemas.execution import ExecuteRequest, ExecutionJobResponse, ExecutionResult
 from app.services.execution_service import (
     get_execution_result,
-    stream_output_csv,
     submit_execution_job,
 )
 from app.session.session_store import SessionStore
@@ -70,11 +70,16 @@ async def download_output_csv(
     session_id: str,
     job_id: str,
     session_store: SessionStore = Depends(deps_session_store),
-) -> StreamingResponse:
-    return StreamingResponse(
-        stream_output_csv(job_id, session_id, session_store),
+) -> FileResponse:
+    job = await get_execution_result(job_id, session_id, session_store)
+    if job.status != "success" or not job.output_csv_path:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_code": "OUTPUT_NOT_READY", "message": "Output CSV is not available yet."},
+        )
+
+    return FileResponse(
+        path=job.output_csv_path,
         media_type="text/csv",
-        headers={
-            "Content-Disposition": 'attachment; filename="output.csv"',
-        },
+        filename="output.csv",
     )
