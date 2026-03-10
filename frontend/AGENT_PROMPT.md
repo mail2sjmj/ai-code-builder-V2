@@ -8,18 +8,26 @@
 
 ## 1. Understand the Application
 
-This frontend drives a **linear 5-step workflow** — each step unlocks the next:
+This frontend drives a **linear 5-step workflow** plus **library and caching features**:
 
+### Core Workflow
 | Step | What the user does | UI element unlocked |
 |---|---|---|
-| 1 | Drops a CSV or XLSX file | File upload zone (always visible) |
-| 2 | Types transformation instructions | Instruction panel (after upload) |
+| 1 | Drops a CSV or XLSX file | File upload zone (Pilot sidebar) |
+| 2 | Types transformation instructions | Instruction panel (main content) |
 | 3 | Clicks "Refine" — AI rewrites instructions | Refined prompt box; code gen panel |
-| 4 | Clicks "Generate Code" — AI writes Python | Monaco editor |
+| 4 | Clicks "Generate Code" — AI writes Python | Monaco editor (Source Console) |
 | 5 | Clicks "Run" — previews output, downloads CSV | Execution panel, results table |
 
 The UI enforces this order — sections are conditionally rendered based on workflow progress.
 Never show a section the user hasn't earned yet. Never skip a step.
+
+### Library & Caching Features (always accessible)
+
+- **Instructions Library** (right sidebar) — save/load/delete named instruction templates. Loading an instruction checks the Code Cache for previously generated code, restoring it instantly if found.
+- **Code Library** (right sidebar) — save/load/delete/share named Python snippets. Code can be public or private. Loading a snippet resets the Monaco editor via `loadKey` increment.
+- **Code Cache** (transparent) — automatically records `label → {code, raw_instructions, refined_prompt}` when the user saves to the instructions library. Queried silently when loading instructions.
+- **File Summary Modal** — launched from the Pilot sidebar; shows per-column statistics for the uploaded dataset.
 
 ---
 
@@ -96,16 +104,21 @@ Tracks `sessionId`, file metadata, and `currentStep` (1–5).
 - `reset()` — clears everything; returns to step 1. Called when the user removes the file.
 
 ### Instruction Store
-Tracks `rawInstructions`, `refinedPrompt`, and `isRefining`.
-- `setRaw(v)` — bound to the textarea's `onChange`.
-- `appendRefined(chunk)` — called by the SSE stream consumer as chunks arrive.
-- `setRefined(v)` — used to seed an initial value or set in edit mode.
+Tracks `rawInstructions`, `refinedPrompt`, `isRefining`, plus library/cache fields.
+- `setRawInstructions(text)` — bound to textarea `onChange`; clears `isFromCache` and `instructionsOutOfSync`.
+- `appendRefinedChunk(chunk)` — called by SSE stream consumer as chunks arrive.
+- `activeSavedLabel` — the label of the currently-loaded saved instruction (used for cache lookup).
+- `isFromCache` — `true` when the current code was loaded from cache (not freshly generated).
+- `instructionsOutOfSync` — `true` when instructions were edited after code was generated.
+- `loadCachedState(raw, refined, label)` — atomically restores cached instruction+prompt+label.
 
 ### Code Store
-Tracks `generatedCode`, `editedCode`, and `isGenerating`.
-- `generatedCode` and `editedCode` start identical; the user may edit `editedCode` after generation.
+Tracks `generatedCode`, `editedCode`, `isGenerating`, and `loadKey`.
+- `loadKey` — an incrementing counter used as `key={loadKey}` on the Monaco editor to force full remount when new code is loaded. **Critical:** always use `setGeneratedCode('')` (not `resetCode()`) at the start of a load operation because only `setGeneratedCode` increments `loadKey`.
+- `generatedCode` and `editedCode` start identical; user may edit `editedCode` after generation.
 - `appendCode(chunk)` — called by the SSE stream consumer.
-- `setEdited(code)` — called by the Monaco editor's `onChange` when not generating.
+- `setEditedCode(code)` — called by the Monaco editor's `onChange` when not generating.
+- `resetCode()` — clears code but does NOT increment `loadKey`. Use only for full workflow resets.
 
 ### Execution Store
 Tracks `status`, `jobId`, `previewRows`, `previewColumns`, `errorMessage`, `executionTimeMs`.
@@ -230,8 +243,9 @@ this same generator. Do not duplicate the parsing logic.
 
 **MonacoCodeEditor**
 - Python language, `vs-dark` theme.
+- Uses `key={loadKey}` — this is **critical** for correct behaviour. `loadKey` increments when `setGeneratedCode` is called, forcing a full editor remount. Without this, switching between library functions causes stale code to appear.
 - `value` prop: use `generatedCode` while generating (read-only); switch to `editedCode` when done.
-- `onChange` only calls `setEdited` when `isGenerating` is false.
+- `onChange` only calls `setEditedCode` when `isGenerating` is false.
 - `readOnly` option enabled while generating.
 - Show a small "Generating…" badge in the bottom-right corner while streaming.
 
@@ -268,20 +282,36 @@ this same generator. Do not duplicate the parsing logic.
 
 ## 9. App Assembly Design
 
-**Strategy: conditional rendering gates each step. Providers at the root.**
+**Strategy: 3-panel layout with conditional rendering. Providers at the root.**
 
 - Wrap everything in `QueryClientProvider` (TanStack Query) — required for `useMutation`.
-- Place `<Toaster>` (Sonner) at the root, outside the main content, with `richColors` and `position="top-right"`.
+- Place `<Toaster>` (Sonner) at the root with `richColors` and `position="top-right"`.
 - `QueryClient` defaults: `retry: 1` for queries, `retry: 0` for mutations, `staleTime: 30_000`.
 - Wrap `<App>` in `<ErrorBoundary>` in `main.tsx` as a safety net.
-- `<WorkflowStepper>` is rendered just below the header, above the main content area.
-- Main content area: `max-w-7xl`, `mx-auto`, `px-6 py-8`, `space-y-8`.
-- Step sections use a `StepHeading` sub-component: numbered blue badge + title + subtitle.
-- Rendering logic:
-  - Step 1 (upload): always visible.
-  - Step 2 (instructions): visible when `sessionId` is truthy.
-  - Step 3 (code gen): visible when `currentStep >= 3`.
-  - Step 4 (execution): visible when `currentStep >= 4`.
+
+### 3-Panel Layout (`flex h-screen flex-col overflow-hidden`)
+
+1. **Top bar** (`flex-shrink-0`, `z-20`): `<AppHeader />` + `<WorkflowStepper />`
+2. **Body** (`flex flex-1 overflow-hidden`):
+   - **Left: `PilotSidebar`** (`w-72`, `overflow-y-auto`) — Data Workspace header, Dataset Details collapsible (column table + File Summary + Re-upload), Data Ingestion collapsible (`FileUploadZone`). `FileSummaryModal` portals from here.
+   - **Center: `MainContent`** (`flex-1`, `overflow-y-auto`) — conditionally renders Instruction Panel (after upload), Code Gen Panel (when Source Console toggled on), Execution Panel (after execution completes).
+   - **Right: `CodeSidebar`** (`w-80`, `overflow-y-auto`) — Engineering Workspace header, Source Console toggle switch, `InstructionsLibraryPanel`, `CodeLibraryPanel`.
+
+### Rendering Logic
+
+- `InstructionPanel`: visible when `sessionId` is truthy.
+- `CodeGenPanel`: visible when `codeStudioOpen === true && currentStep >= 2`.
+- `ExecutionPanel`: visible when `executionStatus === 'success' || 'error'`.
+- `FileSummaryModal`: rendered conditionally as an overlay when the File Summary button is clicked.
+
+### Library Panel Interaction Pattern
+
+When a user loads an item from a library panel:
+1. Call `setGeneratedCode('')` (not `resetCode()`) to clear editor **and** increment `loadKey`.
+2. Call `resetExecution()` to clear execution state.
+3. Fetch content from backend.
+4. Call `setGeneratedCode(code)` to load new content (increments `loadKey` again, causing Monaco remount).
+5. Optionally restore instruction state via `loadCachedState` or `setRawInstructions`.
 
 ---
 
@@ -320,3 +350,6 @@ this same generator. Do not duplicate the parsing logic.
 | Using `any` type | Define proper types in `api.types.ts`; use `unknown` when type is genuinely unknown |
 | Missing `/// <reference types="vite/client" />` | Without this, `import.meta.env` will be a TypeScript error |
 | Polling indefinitely on execution | Cap polling at `maxPollAttempts` and surface a timeout error to the user |
+| Using `resetCode()` when loading a library function | Use `setGeneratedCode('')` instead — only `setGeneratedCode` increments `loadKey`, forcing Monaco to remount and clear stale state |
+| Forgetting to add `key={loadKey}` to Monaco Editor | Without this, the editor does not remount when switching between library functions and stale code persists |
+| Direct component fetch in library panels | Library panels fetch directly (not via hooks) since they manage their own local list state; this is intentional for collapsible panel UX |

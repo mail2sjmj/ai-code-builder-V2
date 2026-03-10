@@ -8,17 +8,27 @@
 
 ## 1. Understand the Application
 
-This backend powers a **5-step AI-assisted data transformation workflow**:
+This backend powers an **AI-assisted data transformation platform** with a core 5-step
+workflow plus persistent library and caching features:
 
-1. User uploads a CSV or XLSX file
+### Core Workflow (5 steps)
+
+1. User uploads a CSV or XLSX file (optional: metadata-only file for schema-first workflows)
 2. User writes plain-English transformation instructions
 3. AI refines the instructions into a precise structured prompt (streamed)
 4. AI generates Python transformation code from that prompt (streamed)
 5. User runs the code; a preview of the output is shown; result is downloadable as CSV
 
-Every feature maps to exactly one of these steps. Before writing any file, understand
-which step it belongs to. If a piece of code does not serve one of these steps, question
-whether it belongs here at all.
+### Persistence & Reuse Features
+
+- **Code Library** — saves generated `.py` files to `CODE_LIBRARY_DIR/{public|private}/`. Files can be listed, retrieved, shared to public, shared with specific users, or deleted.
+- **Instructions Library** — saves instruction templates as `.txt` files to `INSTRUCTIONS_LIBRARY_DIR/`. Supports list, retrieve, and delete.
+- **Code Cache** — caches `label → {code, raw_instructions, refined_prompt}` as `.json` files in `CODE_CACHE_DIR/`. Allows instant recall of previously generated code for a named instruction.
+- **File Summary** — computes per-column statistics (record count, null count, unique count, min/max) from the uploaded Parquet cache.
+- **Column Values** — returns sample or full unique values for a specified column.
+
+Every feature maps to one of these concerns. Before writing any file, understand
+which concern it belongs to.
 
 ---
 
@@ -66,8 +76,14 @@ schemas and session; nothing in the inner layers imports from `api/`.
 - Use Pydantic `BaseSettings` to define every configurable value with types, defaults, and validation constraints.
 - Load config in priority order: built-in defaults → `.env` → `.env.<APP_ENV>` → `.env.<APP_ENV>.local` → OS environment variables.
 - `APP_ENV` determines which overlay file is loaded. It must be discoverable without instantiating `Settings` (bootstrap problem — read `.env` with raw bytes, do not use Pydantic for this step).
-- All directory paths (`INBOUND_DIR`, `TEMP_DIR`, `LOG_DIR`) must default to `tempfile.gettempdir()` sub-folders. Never hardcode `/tmp` or `C:\Temp`.
-- `INBOUND_DIR` (uploaded files, session-lifetime data) and `TEMP_DIR` (ephemeral sandbox artifacts) are intentionally separate — they can live on different storage volumes in production.
+- All directory paths must default to `tempfile.gettempdir()` sub-folders via `default_factory`. Never hardcode `/tmp` or `C:\Temp`.
+- Five separate directory settings, each with a distinct lifetime and purpose:
+  - `INBOUND_DIR` — uploaded files + Parquet caches (session-lifetime, should be persistent)
+  - `CODE_LIBRARY_DIR` — saved `.py` snippets (long-lived, user-managed)
+  - `INSTRUCTIONS_LIBRARY_DIR` — saved `.txt` instruction templates (long-lived, user-managed)
+  - `CODE_CACHE_DIR` — `.json` label→code cache (long-lived, auto-managed)
+  - `TEMP_DIR` — ephemeral sandbox artifacts (short-lived, can be on a fast scratch disk)
+- Two model settings, one per AI use case: `REFINE_MODEL` (fast, low-token) and `CODEGEN_MODEL` (more capable). `ANTHROPIC_MODEL` is a legacy fallback.
 - Wrap `get_settings()` with `@lru_cache` — it must be a singleton. Never call the Settings constructor more than once per process.
 - All `.env*` files except `.env.example` are gitignored. `.env.example` is the committed template.
 - When reading `.env` files manually (for bootstrap), use a BOM-aware encoding fallback chain: `utf-8-sig` → `utf-16` → `latin-1`. This prevents `UnicodeDecodeError` on Windows where editors sometimes save as UTF-16.
@@ -230,8 +246,10 @@ Before the first start:
 | Decision | Rationale |
 |---|---|
 | In-memory session store (no DB) | Keeps the backend stateless and dependency-free; sessions are ephemeral by design |
-| Separate INBOUND_DIR and TEMP_DIR | Uploaded data has session lifetime; sandbox artifacts are ephemeral; can live on different volumes |
+| Five separate storage directories | Each has a distinct lifetime (session vs. user-managed vs. ephemeral); can live on different storage volumes |
 | Parquet cache on upload | 10-100x faster than re-reading CSV on every AI or execution request |
+| File-based library/cache (no DB) | Zero infrastructure — code/instruction libraries are just `.py`/`.txt`/`.json` files on disk; simple to back up and migrate |
+| Separate REFINE_MODEL and CODEGEN_MODEL | Allows tuning cost/quality trade-off independently per use case |
 | Subprocess isolation for code execution | Crash/OOM/timeout in user code cannot affect the FastAPI process |
 | Four-layer security model | Each layer catches what the previous one misses; removing any one weakens the system |
 | SSE over WebSockets | Simpler protocol for unidirectional server→client streaming; no connection upgrade needed |
