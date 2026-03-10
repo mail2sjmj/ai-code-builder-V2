@@ -60,7 +60,11 @@ scripts/stop.sh            # stop backend + frontend
 ```
 
 Backend runs at http://localhost:8000. API docs at http://localhost:8000/docs.
-Frontend runs at http://localhost:5173.
+Frontend dev server runs at http://127.0.0.1:5173 by default.
+
+In local development, the frontend uses relative API paths by default and relies on
+the Vite proxy (`/api` -> `http://127.0.0.1:8000`). This avoids browser "Network Error"
+issues caused by `localhost` vs `127.0.0.1` origin mismatches.
 
 ### Local Development (Manual)
 
@@ -115,6 +119,7 @@ Key settings:
 | `CODEGEN_MODEL` | `claude-haiku-4-5-20251001` | Model for code generation |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Max execution time |
 | `MAX_UPLOAD_SIZE_MB` | `50` | File size limit |
+| `VITE_API_BASE_URL` | `` (empty) | Frontend API base URL; leave empty in dev to use the Vite proxy |
 | `PREVIEW_ROW_COUNT` | `50` | Preview rows shown |
 | `INBOUND_DIR` | `<tmpdir>/code_builder_inbound` | Uploaded files + parquet cache |
 | `CODE_LIBRARY_DIR` | `<tmpdir>/code_builder_library` | Saved Python code snippets |

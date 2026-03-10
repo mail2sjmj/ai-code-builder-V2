@@ -1,7 +1,8 @@
 /** Central application configuration — all values from env vars with safe defaults. */
 const appConfig = {
   api: {
-    baseUrl: (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8000',
+    // Empty baseUrl uses same-origin requests; in dev, Vite proxy forwards /api to backend.
+    baseUrl: (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '',
     prefix: '/api/v1',
     timeoutMs: 30_000,
   },

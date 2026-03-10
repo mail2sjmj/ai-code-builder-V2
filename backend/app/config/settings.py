@@ -37,7 +37,12 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     API_PREFIX: str = "/api/v1"
     ALLOWED_ORIGINS: list[str] = Field(
-        default=["http://localhost:5173", "http://localhost:80"]
+        default=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:80",
+            "http://127.0.0.1:80",
+        ]
     )
 
     # ── File Upload ───────────────────────────────────────────────────────────

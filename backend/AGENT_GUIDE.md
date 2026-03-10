@@ -213,7 +213,7 @@ APP_ENV=development   # development | staging | production
 APP_ENV=development
 APP_VERSION=1.0.0
 API_PREFIX=/api/v1
-ALLOWED_ORIGINS=["http://localhost:5173","http://localhost:3000","http://localhost:80"]
+ALLOWED_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173","http://localhost:3000","http://localhost:80","http://127.0.0.1:80"]
 
 # ── File Upload ───────────────────────────────────────────────────────────────
 MAX_UPLOAD_SIZE_MB=50

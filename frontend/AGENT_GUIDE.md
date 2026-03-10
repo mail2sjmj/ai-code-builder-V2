@@ -323,7 +323,8 @@ Centralise every magic number here. No hard-coded values elsewhere.
 ```typescript
 export const APP_CONFIG = {
   api: {
-    baseUrl:   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
+    // Empty means same-origin; Vite dev proxy forwards /api to backend.
+    baseUrl:   import.meta.env.VITE_API_BASE_URL ?? '',
     prefix:    '/api/v1',
     timeoutMs: 30_000,
   },
@@ -1405,11 +1406,15 @@ npm run test:watch
 
 ## 19. Environment Variables
 
-Create a `.env.local` file in the `frontend/` directory:
+Create a `.env.local` file in the `frontend/` directory (optional for dev):
 
 ```
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=
 ```
+
+Keep `VITE_API_BASE_URL` empty in local development so requests use relative paths and
+Vite proxies `/api` to `http://127.0.0.1:8000`. Set a full URL only when needed for
+non-proxied environments.
 
 All env variables that should be available in the browser **must** be prefixed with `VITE_`.
 
