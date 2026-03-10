@@ -81,7 +81,7 @@ hook's job. Hooks do not render anything. Stores do not import from components o
 
 Create `src/config/app.config.ts` as a single exported `APP_CONFIG` constant covering:
 
-- API base URL (from `import.meta.env.VITE_API_BASE_URL` with fallback to `http://localhost:8000`)
+- API base URL (from `import.meta.env.VITE_API_BASE_URL` with fallback to empty string `''`)
 - API prefix path and request timeout
 - Upload constraints (max file size in MB, allowed extensions, allowed MIME types)
 - Editor options (theme, language, font size, minimap, word wrap)
@@ -330,9 +330,10 @@ When a user loads an item from a library panel:
 ## 11. Environment Variables
 
 - All browser-accessible variables must be prefixed with `VITE_`.
-- Only one variable is needed: `VITE_API_BASE_URL` (defaults to `http://localhost:8000`).
+- Only one variable is needed: `VITE_API_BASE_URL` (defaults to empty, so relative paths are used).
+- In local dev, keep it empty and rely on Vite proxy (`/api` to `http://127.0.0.1:8000`).
 - Store this in `frontend/.env.local` (gitignored). Do not commit API URLs.
-- During development, Vite proxies `/api` requests to `http://localhost:8000` — this means relative `/api` URLs also work, but the config uses the full URL for consistency.
+- During development, Vite proxies `/api` requests to `http://127.0.0.1:8000`.
 
 ---
 

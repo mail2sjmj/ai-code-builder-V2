@@ -83,7 +83,7 @@ schemas and session; nothing in the inner layers imports from `api/`.
   - `INSTRUCTIONS_LIBRARY_DIR` — saved `.txt` instruction templates (long-lived, user-managed)
   - `CODE_CACHE_DIR` — `.json` label→code cache (long-lived, auto-managed)
   - `TEMP_DIR` — ephemeral sandbox artifacts (short-lived, can be on a fast scratch disk)
-- Two model settings, one per AI use case: `REFINE_MODEL` (fast, low-token) and `CODEGEN_MODEL` (more capable). `ANTHROPIC_MODEL` is a legacy fallback.
+- Two model settings, one per AI use case: `REFINE_MODEL` (fast, low-token) and `CODEGEN_MODEL` (more capable). `LEGACY_MODEL` is a legacy fallback.
 - Wrap `get_settings()` with `@lru_cache` — it must be a singleton. Never call the Settings constructor more than once per process.
 - All `.env*` files except `.env.example` are gitignored. `.env.example` is the committed template.
 - When reading `.env` files manually (for bootstrap), use a BOM-aware encoding fallback chain: `utf-8-sig` → `utf-16` → `latin-1`. This prevents `UnicodeDecodeError` on Windows where editors sometimes save as UTF-16.
