@@ -13,16 +13,32 @@ AI-generated Python code in a restricted sandbox.
 
 ### API Surface
 
-| Method | Path                                         | Purpose                          |
-|--------|----------------------------------------------|----------------------------------|
-| GET    | `/health`                                    | Health check                     |
-| POST   | `/api/v1/upload`                             | Upload CSV / XLSX file           |
-| POST   | `/api/v1/instructions/refine`                | Refine raw instructions (SSE)    |
-| POST   | `/api/v1/codegen/generate`                   | Generate Python code (SSE)       |
-| POST   | `/api/v1/codegen/fix`                        | Auto-fix broken code (SSE)       |
-| POST   | `/api/v1/execute`                            | Submit code execution job        |
-| GET    | `/api/v1/execute/{session_id}/{job_id}`      | Poll job status                  |
-| GET    | `/api/v1/execute/{session_id}/{job_id}/output` | Download result CSV            |
+| Method | Path                                                      | Purpose                                          |
+|--------|-----------------------------------------------------------|--------------------------------------------------|
+| GET    | `/health`                                                 | Health check                                     |
+| POST   | `/api/v1/upload`                                          | Upload CSV / XLSX file                           |
+| POST   | `/api/v1/upload/metadata-preview`                         | Preview columns from a metadata-only file        |
+| POST   | `/api/v1/upload/metadata-sample`                          | Generate synthetic CSV sample from metadata      |
+| GET    | `/api/v1/session/{session_id}/summary`                    | Column-level statistics (nulls, uniques, min/max)|
+| GET    | `/api/v1/session/{session_id}/column-values`              | Sample/unique values for a column                |
+| POST   | `/api/v1/instructions/refine`                             | Refine raw instructions (SSE)                    |
+| POST   | `/api/v1/codegen/generate`                                | Generate Python code (SSE)                       |
+| POST   | `/api/v1/codegen/fix`                                     | Auto-fix broken code (SSE)                       |
+| POST   | `/api/v1/execute`                                         | Submit code execution job                        |
+| GET    | `/api/v1/execute/{session_id}/{job_id}`                   | Poll job status                                  |
+| GET    | `/api/v1/execute/{session_id}/{job_id}/output`            | Download result CSV                              |
+| POST   | `/api/v1/code-library/save`                               | Save Python code snippet (public or private)     |
+| GET    | `/api/v1/code-library/{visibility}`                       | List saved code files                            |
+| GET    | `/api/v1/code-library/{visibility}/{filename}/content`    | Retrieve content of a saved code file            |
+| POST   | `/api/v1/code-library/private/{filename}/share-public`    | Copy private file to public library              |
+| POST   | `/api/v1/code-library/private/{filename}/share-users`     | Share private file with specific user IDs        |
+| DELETE | `/api/v1/code-library/{visibility}/{filename}`            | Delete a saved code file                         |
+| POST   | `/api/v1/instructions-library/save`                       | Save an instruction template                     |
+| GET    | `/api/v1/instructions-library/list`                       | List all saved instruction templates             |
+| GET    | `/api/v1/instructions-library/{filename}`                 | Retrieve instruction text                        |
+| DELETE | `/api/v1/instructions-library/{filename}`                 | Delete an instruction template                   |
+| POST   | `/api/v1/code-cache/save`                                 | Save instruction-label → code mapping            |
+| GET    | `/api/v1/code-cache/{label}`                              | Retrieve cached code for a label                 |
 
 ### Technology Choices
 
@@ -68,7 +84,10 @@ ai-code-builder/
 │   │   │       ├── upload.py
 │   │   │       ├── instructions.py
 │   │   │       ├── codegen.py
-│   │   │       └── execution.py
+│   │   │       ├── execution.py
+│   │   │       ├── code_library.py
+│   │   │       ├── instructions_library.py
+│   │   │       └── code_cache.py
 │   │   ├── config/
 │   │   │   ├── __init__.py
 │   │   │   └── settings.py
@@ -86,20 +105,27 @@ ai-code-builder/
 │   │   │   ├── upload.py
 │   │   │   ├── instruction.py
 │   │   │   ├── codegen.py
-│   │   │   └── execution.py
+│   │   │   ├── execution.py
+│   │   │   ├── code_library.py
+│   │   │   ├── instructions_library.py
+│   │   │   └── code_cache.py
 │   │   ├── services/
 │   │   │   ├── __init__.py
 │   │   │   ├── codegen_service.py
 │   │   │   ├── execution_service.py
 │   │   │   ├── file_service.py
-│   │   │   └── instruction_service.py
+│   │   │   ├── instruction_service.py
+│   │   │   ├── code_library_service.py
+│   │   │   ├── instructions_library_service.py
+│   │   │   └── code_cache_service.py
 │   │   ├── session/
 │   │   │   ├── __init__.py
 │   │   │   └── session_store.py
 │   │   └── utils/
 │   │       ├── __init__.py
 │   │       ├── file_utils.py
-│   │       └── streaming.py
+│   │       ├── streaming.py
+│   │       └── anthropic_client.py
 │   ├── .env                    # APP_ENV selector only (gitignored)
 │   ├── .env.development        # full dev config incl. secrets (gitignored)
 │   ├── .env.staging            # full staging config (gitignored)
@@ -192,17 +218,27 @@ ALLOWED_ORIGINS=["http://localhost:5173","http://localhost:3000","http://localho
 # ── File Upload ───────────────────────────────────────────────────────────────
 MAX_UPLOAD_SIZE_MB=50
 ALLOWED_EXTENSIONS=[".csv",".xlsx"]
-# INBOUND_DIR: where uploaded files + parquet caches are stored.
-# Defaults to <tempdir>/code_builder_inbound if unset.
+METADATA_SAMPLE_DEFAULT_ROWS=100
+METADATA_SAMPLE_MAX_ROWS=5000
+
+# ── Storage Directories ───────────────────────────────────────────────────────
+# All dirs auto-resolve via tempfile.gettempdir() if left unset.
+# In staging/production set these to persistent, backed-up volumes.
+#
+# INBOUND_DIR   — uploaded files + parquet caches (long-lived, per-session)
 # INBOUND_DIR=
+# CODE_LIBRARY_DIR  — saved Python code snippets (.py files, public + private)
+# CODE_LIBRARY_DIR=
+# INSTRUCTIONS_LIBRARY_DIR  — saved instruction prompts (.txt files)
+# INSTRUCTIONS_LIBRARY_DIR=
+# CODE_CACHE_DIR  — instruction-label → code mappings (.json files)
+# CODE_CACHE_DIR=
+# TEMP_DIR  — ephemeral sandbox artifacts (wrapper scripts, output CSVs)
+# TEMP_DIR=
 
 SESSION_TTL_SECONDS=3600
 
 # ── Sandbox Execution ─────────────────────────────────────────────────────────
-# TEMP_DIR: ephemeral sandbox artifacts (separate volume from INBOUND_DIR).
-# Defaults to <tempdir>/code_builder_sessions if unset.
-# TEMP_DIR=
-
 SANDBOX_TIMEOUT_SECONDS=30
 SANDBOX_MAX_MEMORY_MB=512
 SANDBOX_MAX_OUTPUT_ROWS=100000
@@ -217,11 +253,15 @@ LOG_BACKUP_COUNT=5
 
 # ── Anthropic AI — REQUIRED ───────────────────────────────────────────────────
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-6
-REFINE_MAX_TOKENS=2048
+ANTHROPIC_MODEL=claude-sonnet-4-6       # legacy fallback; prefer REFINE_MODEL / CODEGEN_MODEL
+REFINE_MODEL=claude-haiku-4-5-20251001  # fast model for prompt expansion
+CODEGEN_MODEL=claude-haiku-4-5-20251001 # fast model for code generation
+REFINE_MAX_TOKENS=1024
 CODEGEN_MAX_TOKENS=8192
+CODEGEN_SAMPLE_ROWS=10
 AI_TEMPERATURE=0.2
 AI_REQUEST_TIMEOUT_SECONDS=120
+AI_MAX_RETRIES=5
 ```
 
 All `.env*` files except `.env.example` are gitignored — they contain secrets.
@@ -270,13 +310,24 @@ class Settings(BaseSettings):
     )
 
     # ── File Upload ───────────────────────────────────────────────────────
-    MAX_UPLOAD_SIZE_MB:  int       = Field(default=50, ge=1, le=500)
-    ALLOWED_EXTENSIONS:  list[str] = Field(default=[".csv", ".xlsx"])
+    MAX_UPLOAD_SIZE_MB:            int       = Field(default=50,    ge=1, le=500)
+    ALLOWED_EXTENSIONS:            list[str] = Field(default=[".csv", ".xlsx"])
+    METADATA_SAMPLE_DEFAULT_ROWS:  int       = Field(default=100,   ge=1, le=100_000)
+    METADATA_SAMPLE_MAX_ROWS:      int       = Field(default=5_000, ge=1, le=1_000_000)
 
     # INBOUND_DIR: where uploaded files (original + parquet cache) live.
     # Use a persistent, backed-up volume in staging/production.
     INBOUND_DIR: str = Field(
         default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_inbound")
+    )
+    CODE_LIBRARY_DIR: str = Field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_library")
+    )
+    INSTRUCTIONS_LIBRARY_DIR: str = Field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_instructions")
+    )
+    CODE_CACHE_DIR: str = Field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_code_cache")
     )
     SESSION_TTL_SECONDS: int = Field(default=3600, ge=60)
 
@@ -300,11 +351,15 @@ class Settings(BaseSettings):
 
     # ── Anthropic AI ──────────────────────────────────────────────────────
     ANTHROPIC_API_KEY:          str   = Field(default="")
-    ANTHROPIC_MODEL:            str   = "claude-sonnet-4-6"
-    REFINE_MAX_TOKENS:          int   = Field(default=2048,  ge=256,  le=8192)
+    ANTHROPIC_MODEL:            str   = "claude-sonnet-4-6"   # legacy fallback
+    REFINE_MODEL:               str   = Field(default="claude-haiku-4-5-20251001")
+    CODEGEN_MODEL:              str   = Field(default="claude-haiku-4-5-20251001")
+    REFINE_MAX_TOKENS:          int   = Field(default=1024,  ge=256,  le=4096)
     CODEGEN_MAX_TOKENS:         int   = Field(default=8192,  ge=1024, le=32768)
+    CODEGEN_SAMPLE_ROWS:        int   = Field(default=10,    ge=1,    le=100)
     AI_TEMPERATURE:             float = Field(default=0.2,   ge=0.0,  le=1.0)
     AI_REQUEST_TIMEOUT_SECONDS: int   = Field(default=120,   ge=10,   le=600)
+    AI_MAX_RETRIES:             int   = Field(default=5,     ge=0,    le=10)
 
     @field_validator("ALLOWED_EXTENSIONS", "ALLOWED_ORIGINS", mode="before")
     @classmethod
@@ -550,9 +605,165 @@ class ExecutionResult(BaseModel):
     execution_time_ms: int | None    = None
 ```
 
+### `app/schemas/code_library.py`
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+Visibility = Literal["public", "private"]
+
+class SaveCodeRequest(BaseModel):
+    code:       str
+    label:      str
+    visibility: Visibility = "private"
+    overwrite:  bool       = False
+
+class SaveCodeResponse(BaseModel):
+    saved_in:  str
+    filenames: list[str]
+
+class CodeLibraryItem(BaseModel):
+    filename:   str
+    label:      str
+    visibility: Visibility
+
+class CodeLibraryListResponse(BaseModel):
+    visibility: str
+    items:      list[CodeLibraryItem]
+
+class CodeContentResponse(BaseModel):
+    filename:   str
+    visibility: str
+    code:       str
+
+class ShareToPublicResponse(BaseModel):
+    filename: str
+    message:  str
+
+class ShareToUsersRequest(BaseModel):
+    user_ids: list[str]
+
+class ShareToUsersResponse(BaseModel):
+    filename:  str
+    shared_to: list[str]
+```
+
+### `app/schemas/instructions_library.py`
+
+```python
+from pydantic import BaseModel
+
+class SaveInstructionRequest(BaseModel):
+    instruction: str
+    label:       str
+    overwrite:   bool = False
+
+class SaveInstructionResponse(BaseModel):
+    filename: str
+
+class InstructionLibraryItem(BaseModel):
+    filename: str
+    label:    str
+
+class InstructionLibraryListResponse(BaseModel):
+    items: list[InstructionLibraryItem]
+```
+
+### `app/schemas/code_cache.py`
+
+```python
+from pydantic import BaseModel
+
+class SaveCodeCacheRequest(BaseModel):
+    label:            str
+    code:             str
+    raw_instructions: str
+    refined_prompt:   str
+
+class SaveCodeCacheResponse(BaseModel):
+    label: str
+
+class CodeCacheEntry(BaseModel):
+    label:            str
+    code:             str
+    raw_instructions: str
+    refined_prompt:   str
+```
+
+### `app/schemas/upload.py` (extended)
+
+```python
+# Additional schemas added beyond the base UploadResponse
+
+class ColumnSummary(BaseModel):
+    column:           str
+    dtype:            str
+    record_count:     int
+    null_count:       int
+    count_with_values: int
+    unique_count:     int
+    is_key_column:    str   # "Yes" | "No"
+    min_value:        str | None
+    max_value:        str | None
+
+class FileSummaryResponse(BaseModel):
+    session_id: str
+    filename:   str
+    columns:    list[ColumnSummary]
+
+class ColumnValuesResponse(BaseModel):
+    column:    str
+    values:    list[str]
+    is_sample: bool   # True if unique count > 20 (random sample returned)
+
+class MetadataPreviewResponse(BaseModel):
+    filename:        str
+    column_count:    int
+    columns:         list[str]
+    dtypes:          dict[str, str]
+    file_size_bytes: int
+```
+
 ---
 
-## 9. Utility Modules — `app/utils/`
+## 9. Library & Cache Services
+
+### `app/services/code_library_service.py`
+
+File-based code library. Stores `.py` files in `CODE_LIBRARY_DIR/public/` and
+`CODE_LIBRARY_DIR/private/`. Filenames are derived from the label (slug-safe).
+Sharing copies the file to the target location.
+
+Key functions:
+- `save_code_to_library(code, label, visibility, settings, overwrite)` → `(saved_in, filenames)`
+- `list_library_codes(visibility, settings)` → list of `{filename, label, visibility}`
+- `get_code_content(visibility, filename, settings)` → `str | None`
+- `share_code_to_public(filename, settings)` → copies `private/` → `public/`
+- `share_code_to_users(filename, user_ids, settings)` → copies to user-namespaced dirs
+- `delete_code_from_library(visibility, filename, settings)`
+
+### `app/services/instructions_library_service.py`
+
+File-based instruction library. Stores `.txt` files in `INSTRUCTIONS_LIBRARY_DIR/`.
+
+Key functions:
+- `save_instruction_to_library(instruction, label, settings, overwrite)` → `filename`
+- `list_library_instructions(settings)` → list of `{filename, label}`
+- `get_instruction_text(filename, settings)` → `str`
+- `delete_instruction_from_library(filename, settings)`
+
+### `app/services/code_cache_service.py`
+
+Maps instruction labels → generated code + prompts as `.json` files in `CODE_CACHE_DIR/`.
+
+Key functions:
+- `save_code_cache(label, code, raw_instructions, refined_prompt, settings)` → `label`
+- `get_code_cache(label, settings)` → `CodeCacheEntry | None`
+
+---
+
+## 10. Utility Modules — `app/utils/`
 
 ### `app/utils/streaming.py`
 

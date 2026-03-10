@@ -4,13 +4,17 @@ An enterprise-grade AI-powered tool that transforms natural language data instru
 
 ## Features
 
-- **Upload** CSV or XLSX files
+- **Upload** CSV or XLSX files (with optional metadata-only file support)
 - **Write** step-by-step instructions in plain English
 - **Refine** instructions into a structured AI prompt (Claude-powered, streaming)
 - **Generate** Python transformation code (streaming into Monaco editor)
 - **Edit** the generated code directly in the browser
 - **Execute** code in a sandboxed environment using your uploaded data
 - **Preview** output rows in-browser, then **download** the full CSV
+- **Code Library** — save, share, and reuse generated code snippets (public/private)
+- **Instructions Library** — save and reload reusable instruction templates
+- **Code Cache** — auto-cache generated code per instruction label for instant recall
+- **File Summary** — per-column statistics (nulls, uniques, min/max) on uploaded datasets
 
 ## Tech Stack
 
@@ -21,7 +25,7 @@ An enterprise-grade AI-powered tool that transforms natural language data instru
 | Code Editor | Monaco Editor |
 | State | Zustand + TanStack Query |
 | Backend | FastAPI (Python 3.12) |
-| AI | Anthropic Claude (claude-sonnet-4-6) |
+| AI | Anthropic Claude (configurable per-use-case model) |
 | Data | pandas + openpyxl + pyarrow |
 | Sandbox | AST validation + subprocess isolation |
 
@@ -35,8 +39,9 @@ An enterprise-grade AI-powered tool that transforms natural language data instru
 ### Local Development (Recommended — management scripts)
 
 ```bash
-cp backend/.env.example backend/.env
-# Edit backend/.env and set ANTHROPIC_API_KEY=sk-ant-...
+cp backend/.env.example backend/.env.development
+# Edit backend/.env.development and set ANTHROPIC_API_KEY=sk-ant-...
+echo "APP_ENV=development" > backend/.env
 ```
 
 **Windows (PowerShell):**
@@ -62,8 +67,9 @@ Frontend runs at http://localhost:5173.
 **Backend:**
 ```bash
 cd backend
-cp .env.example .env
-# Edit .env and set ANTHROPIC_API_KEY=sk-ant-...
+cp .env.example .env.development
+# Edit .env.development and set ANTHROPIC_API_KEY=sk-ant-...
+echo "APP_ENV=development" > .env
 pip install poetry
 poetry install
 poetry run uvicorn app.main:app --reload
@@ -79,8 +85,9 @@ npm run dev
 ### Docker (Production)
 
 ```bash
-cp backend/.env.example backend/.env
-# Set ANTHROPIC_API_KEY in backend/.env
+cp backend/.env.example backend/.env.development
+# Set ANTHROPIC_API_KEY in backend/.env.development
+echo "APP_ENV=production" > backend/.env
 
 docker-compose up --build
 ```
@@ -100,13 +107,20 @@ All settings are environment-variable driven. See:
 - [`frontend/.env.example`](frontend/.env.example) — frontend config
 
 Key settings:
+
 | Variable | Default | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | required | Your Anthropic API key |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Model for code generation |
+| `REFINE_MODEL` | `claude-haiku-4-5-20251001` | Model for instruction refinement |
+| `CODEGEN_MODEL` | `claude-haiku-4-5-20251001` | Model for code generation |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Max execution time |
 | `MAX_UPLOAD_SIZE_MB` | `50` | File size limit |
 | `PREVIEW_ROW_COUNT` | `50` | Preview rows shown |
+| `INBOUND_DIR` | `<tmpdir>/code_builder_inbound` | Uploaded files + parquet cache |
+| `CODE_LIBRARY_DIR` | `<tmpdir>/code_builder_library` | Saved Python code snippets |
+| `INSTRUCTIONS_LIBRARY_DIR` | `<tmpdir>/code_builder_instructions` | Saved instruction templates |
+| `CODE_CACHE_DIR` | `<tmpdir>/code_builder_code_cache` | Instruction-label → code mappings |
+| `TEMP_DIR` | `<tmpdir>/code_builder_sessions` | Ephemeral sandbox artifacts |
 
 ## Security
 
@@ -119,24 +133,37 @@ The code execution sandbox uses 4 isolation layers:
 ## Project Structure
 
 ```
-ai-code-builder/
+ai-code-builder-V2/
 ├── backend/                 # FastAPI backend
 │   ├── app/
-│   │   ├── api/v1/         # Endpoints: upload, instructions, codegen, execution
-│   │   ├── config/         # Pydantic settings
+│   │   ├── api/v1/         # Endpoints: upload, instructions, codegen, execution,
+│   │   │                   #   code-library, instructions-library, code-cache
+│   │   ├── config/         # Pydantic settings (layered .env loading)
 │   │   ├── prompts/        # AI prompt templates
-│   │   ├── sandbox/        # Code execution sandbox
-│   │   ├── services/       # Business logic
+│   │   ├── sandbox/        # Code execution sandbox (AST + subprocess)
+│   │   ├── services/       # Business logic (file, codegen, library, cache services)
 │   │   ├── session/        # In-memory session store
-│   │   └── schemas/        # Pydantic request/response models
+│   │   ├── schemas/        # Pydantic request/response models
+│   │   └── utils/          # Shared helpers (SSE, file utils, Anthropic client)
+│   ├── .env                # APP_ENV selector only (gitignored)
+│   ├── .env.development    # Full dev config incl. secrets (gitignored)
+│   ├── .env.example        # Committed template — no secrets
 │   └── tests/
 ├── frontend/                # React + TypeScript frontend
 │   └── src/
-│       ├── components/     # UI components
-│       ├── hooks/          # Custom React hooks
-│       ├── store/          # Zustand stores
-│       ├── services/       # API client
-│       └── utils/          # SSE parser, formatters, validation
+│       ├── components/
+│       │   ├── layout/     # AppHeader, WorkflowStepper, CodeLibraryPanel,
+│       │   │               #   InstructionsLibraryPanel, FileSummaryModal
+│       │   ├── upload/     # FileUploadZone, FileMetadataCard
+│       │   ├── instructions/ # InstructionPanel, RawInstructionBox, RefinedPromptBox
+│       │   ├── codegen/    # CodeGenPanel, MonacoCodeEditor
+│       │   └── execution/  # ExecutionPanel, OutputPreviewTable
+│       ├── hooks/          # useFileUpload, useInstructionRefine, useCodeGeneration,
+│       │                   #   useCodeExecution, useAutoFix, useDownload
+│       ├── store/          # Zustand: sessionStore, instructionStore, codeStore, executionStore
+│       ├── services/       # Axios API client
+│       ├── types/          # API DTOs (api.types.ts)
+│       └── utils/          # SSE parser, formatters, toast helpers
 ├── scripts/                 # Service management
 │   ├── start.bat / start.sh # Start backend + frontend
 │   ├── stop.bat  / stop.sh  # Stop backend + frontend

@@ -18,6 +18,12 @@ AI-powered data transformation workflow:
 | 4    | Generate Code       | AI streams Python code into a Monaco editor             |
 | 5    | Execute             | Runs the code; previews output; downloads result CSV    |
 
+Beyond the core workflow, the app has **library and caching features** accessible from the right sidebar:
+
+- **Instructions Library Panel** — save, browse, and load instruction templates. Loading an instruction also restores cached code (via Code Cache) if available.
+- **Code Library Panel** — save, browse, share, and load Python code snippets (public/private visibility).
+- **File Summary Modal** — shows per-column statistics (nulls, uniques, min/max) for the uploaded file.
+
 **Technology choices (non-negotiable):**
 
 | Concern            | Library / Tool                          |
@@ -276,19 +282,21 @@ Create the following folder layout inside `src/` before writing any component co
 ```
 src/
 ├── components/
-│   ├── codegen/
-│   ├── execution/
-│   ├── instructions/
-│   ├── layout/
-│   ├── shared/
-│   └── upload/
-├── config/
-├── hooks/
-├── lib/
-├── services/
-├── store/
-├── types/
-└── utils/
+│   ├── codegen/          # CodeGenPanel, MonacoCodeEditor
+│   ├── execution/        # ExecutionPanel, OutputPreviewTable
+│   ├── instructions/     # InstructionPanel, RawInstructionBox, RefinedPromptBox
+│   ├── layout/           # AppHeader, WorkflowStepper, CodeLibraryPanel,
+│   │                     #   InstructionsLibraryPanel, FileSummaryModal
+│   ├── shared/           # StatusBadge, ErrorBoundary
+│   └── upload/           # FileUploadZone, FileMetadataCard
+├── config/               # app.config.ts — all magic numbers
+├── hooks/                # useFileUpload, useInstructionRefine, useCodeGeneration,
+│                         #   useCodeExecution, useAutoFix, useDownload
+├── lib/                  # utils.ts (cn helper)
+├── services/             # apiClient.ts (Axios + apiGet/apiPost/apiDelete helpers)
+├── store/                # sessionStore, instructionStore, codeStore, executionStore
+├── types/                # api.types.ts — all API DTOs
+└── utils/                # streamParser, fileValidation, formatters, toast
 ```
 
 ---
@@ -373,6 +381,91 @@ export interface ExecutionResult {
   preview_columns:  string[]
   error_message:    string | null
   execution_time_ms: number | null
+}
+
+// ── Code Library ──────────────────────────────────────────────────────────────
+export type Visibility = 'public' | 'private'
+
+export interface CodeLibraryItem {
+  filename:   string
+  label:      string
+  visibility: Visibility
+}
+
+export interface CodeLibraryListResponse {
+  visibility: string
+  items:      CodeLibraryItem[]
+}
+
+export interface CodeLibraryContentResponse {
+  filename:   string
+  visibility: string
+  code:       string
+}
+
+export interface ShareToPublicResponse {
+  filename: string
+  message:  string
+}
+
+export interface ShareToUsersRequest {
+  user_ids: string[]
+}
+
+export interface ShareToUsersResponse {
+  filename:  string
+  shared_to: string[]
+}
+
+// ── Instructions Library ──────────────────────────────────────────────────────
+export interface InstructionLibraryItem {
+  filename: string
+  label:    string
+}
+
+export interface InstructionLibraryListResponse {
+  items: InstructionLibraryItem[]
+}
+
+// ── Code Cache ────────────────────────────────────────────────────────────────
+export interface CodeCacheEntry {
+  label:            string
+  code:             string
+  raw_instructions: string
+  refined_prompt:   string
+}
+
+// ── File Summary ──────────────────────────────────────────────────────────────
+export interface ColumnSummary {
+  column:            string
+  dtype:             string
+  record_count:      number
+  null_count:        number
+  count_with_values: number
+  unique_count:      number
+  is_key_column:     string
+  min_value:         string | null
+  max_value:         string | null
+}
+
+export interface FileSummaryResponse {
+  session_id: string
+  filename:   string
+  columns:    ColumnSummary[]
+}
+
+export interface ColumnValuesResponse {
+  column:    string
+  values:    string[]
+  is_sample: boolean
+}
+
+export interface MetadataPreviewResponse {
+  filename:        string
+  column_count:    number
+  columns:         string[]
+  dtypes:          Record<string, string>
+  file_size_bytes: number
 }
 ```
 
@@ -549,61 +642,86 @@ export const useSessionStore = create<SessionState>((set) => ({
 
 ### 8.2 `src/store/instructionStore.ts`
 
+Extended with library/cache fields: `activeSavedLabel`, `isFromCache`, `instructionsOutOfSync`.
+
 ```typescript
 import { create } from 'zustand'
 
 interface InstructionState {
-  rawInstructions: string
-  refinedPrompt:   string
-  isRefining:      boolean
-  setRaw:          (v: string)  => void
-  setRefined:      (v: string)  => void
-  appendRefined:   (chunk: string) => void
-  setRefining:     (v: boolean) => void
-  reset:           () => void
+  rawInstructions:       string
+  refinedPrompt:         string
+  isRefining:            boolean
+  activeSavedLabel:      string | null   // label of the currently-loaded saved instruction
+  isFromCache:           boolean         // true when code came from cache (not freshly generated)
+  instructionsOutOfSync: boolean         // true when instructions edited after code generated
+  setRawInstructions:    (text: string) => void
+  appendRefinedChunk:    (chunk: string) => void
+  setRefinedPrompt:      (text: string) => void
+  setIsRefining:         (val: boolean) => void
+  resetRefined:          () => void
+  setActiveSavedLabel:   (label: string | null) => void
+  setIsFromCache:        (val: boolean) => void
+  setInstructionsOutOfSync: (val: boolean) => void
+  /** Load raw instructions + refined prompt from a cached entry */
+  loadCachedState: (rawInstructions: string, refinedPrompt: string, activeLabel: string | null) => void
 }
 
 export const useInstructionStore = create<InstructionState>((set) => ({
-  rawInstructions: '',
-  refinedPrompt:   '',
-  isRefining:      false,
-  setRaw:        (v) => set({ rawInstructions: v }),
-  setRefined:    (v) => set({ refinedPrompt: v }),
-  appendRefined: (chunk) => set((s) => ({ refinedPrompt: s.refinedPrompt + chunk })),
-  setRefining:   (v) => set({ isRefining: v }),
-  reset:         () => set({ rawInstructions: '', refinedPrompt: '', isRefining: false }),
+  rawInstructions:       '',
+  refinedPrompt:         '',
+  isRefining:            false,
+  activeSavedLabel:      null,
+  isFromCache:           false,
+  instructionsOutOfSync: false,
+  // Any user edit clears cache + out-of-sync flags so refine+generate run fresh
+  setRawInstructions: (text) => set({ rawInstructions: text, isFromCache: false, instructionsOutOfSync: false }),
+  appendRefinedChunk: (chunk) => set((s) => ({ refinedPrompt: s.refinedPrompt + chunk })),
+  setRefinedPrompt:   (text) => set({ refinedPrompt: text }),
+  setIsRefining:      (val)  => set({ isRefining: val }),
+  resetRefined:       ()     => set({ refinedPrompt: '' }),
+  setActiveSavedLabel: (label) => set({ activeSavedLabel: label }),
+  setIsFromCache:      (val)   => set({ isFromCache: val }),
+  setInstructionsOutOfSync: (val) => set({ instructionsOutOfSync: val }),
+  loadCachedState: (rawInstructions, refinedPrompt, activeLabel) =>
+    set({ rawInstructions, refinedPrompt, isFromCache: true, activeSavedLabel: activeLabel, instructionsOutOfSync: false }),
 }))
 ```
 
 ### 8.3 `src/store/codeStore.ts`
 
+`loadKey` is a counter incremented by `setGeneratedCode`. The Monaco editor uses
+`key={loadKey}` to force a full remount whenever new code is loaded, preventing stale
+editor state when switching between saved library functions.
+
 ```typescript
 import { create } from 'zustand'
 
 interface CodeState {
-  generatedCode: string
-  editedCode:    string
-  isGenerating:  boolean
-  setCode:       (code: string) => void
-  appendCode:    (chunk: string) => void
-  setEdited:     (code: string) => void
-  setGenerating: (v: boolean)   => void
-  resetCode:     () => void
+  generatedCode:   string
+  editedCode:      string
+  isGenerating:    boolean
+  loadKey:         number   // incremented by setGeneratedCode to force Monaco remount
+  setGeneratedCode: (code: string) => void
+  appendCode:      (chunk: string) => void
+  setEditedCode:   (code: string)  => void
+  setIsGenerating: (v: boolean)    => void
+  resetCode:       () => void       // does NOT increment loadKey
 }
 
 export const useCodeStore = create<CodeState>((set) => ({
-  generatedCode: '',
-  editedCode:    '',
-  isGenerating:  false,
-  setCode:       (code) => set({ generatedCode: code, editedCode: code }),
-  appendCode:    (chunk) =>
-    set((s) => ({
-      generatedCode: s.generatedCode + chunk,
-      editedCode:    s.editedCode    + chunk,
-    })),
-  setEdited:     (code) => set({ editedCode: code }),
-  setGenerating: (v)    => set({ isGenerating: v }),
-  resetCode:     ()     => set({ generatedCode: '', editedCode: '', isGenerating: false }),
+  generatedCode:   '',
+  editedCode:      '',
+  isGenerating:    false,
+  loadKey:         0,
+  // setGeneratedCode increments loadKey → Monaco remounts cleanly
+  setGeneratedCode: (code) => set((s) => ({ generatedCode: code, editedCode: code, loadKey: s.loadKey + 1 })),
+  appendCode: (chunk) => set((s) => ({
+    generatedCode: s.generatedCode + chunk,
+    editedCode:    s.editedCode    + chunk,
+  })),
+  setEditedCode:   (code) => set({ editedCode: code }),
+  setIsGenerating: (v)    => set({ isGenerating: v }),
+  resetCode:       ()     => set({ generatedCode: '', editedCode: '' }),  // no loadKey change
 }))
 ```
 
@@ -1087,28 +1205,33 @@ Apply gradient to "Code Genie": `bg-gradient-to-r from-blue-600 via-indigo-500 t
 
 ### `src/components/codegen/MonacoCodeEditor.tsx`
 
+**Important:** The editor uses `key={loadKey}` to force a full remount whenever
+`setGeneratedCode` is called. This ensures stale editor state is cleared when loading
+a new function from the code library.
+
 ```typescript
 import Editor from '@monaco-editor/react'
 import { useCodeStore } from '@/store/codeStore'
 import { APP_CONFIG } from '@/config/app.config'
 
 export function MonacoCodeEditor() {
-  const { generatedCode, editedCode, isGenerating, setEdited } = useCodeStore()
+  const { generatedCode, editedCode, isGenerating, loadKey, setEditedCode } = useCodeStore()
 
   return (
     <div className="relative">
       <Editor
+        key={loadKey}                        // force remount when loadKey changes
         height="400px"
         language={APP_CONFIG.editor.language}
         theme={APP_CONFIG.editor.theme}
         value={isGenerating ? generatedCode : editedCode}
-        onChange={(v) => { if (!isGenerating) setEdited(v ?? '') }}
+        onChange={(v) => { if (!isGenerating) setEditedCode(v ?? '') }}
         options={{
-          readOnly:         isGenerating,
-          fontSize:         APP_CONFIG.editor.fontSize,
-          minimap:          { enabled: APP_CONFIG.editor.minimap },
-          wordWrap:         APP_CONFIG.editor.wordWrap,
-          automaticLayout:  true,
+          readOnly:             isGenerating,
+          fontSize:             APP_CONFIG.editor.fontSize,
+          minimap:              { enabled: APP_CONFIG.editor.minimap },
+          wordWrap:             APP_CONFIG.editor.wordWrap,
+          automaticLayout:      true,
           scrollBeyondLastLine: false,
         }}
       />
@@ -1148,63 +1271,85 @@ export function MonacoCodeEditor() {
 
 ---
 
-## 16. Main App — `src/App.tsx`
+## 16. New Layout Components — Library Panels & File Summary
+
+### `src/components/layout/CodeLibraryPanel.tsx`
+
+Collapsible panel in the right sidebar (Engineering Workspace). Displays public and private code snippet lists with search filtering. On load, fetches code content, calls `setGeneratedCode('')` first (to clear editor + increment `loadKey`) then calls `setGeneratedCode(code)` to populate Monaco. Also checks the code cache for matching instructions.
+
+Key behaviours:
+- Collapsible with open/close chevron
+- Two sections: Public Library and Private Library (each searchable)
+- Per-item actions: Load, Share (to public or specific users), Delete
+- Share dialog: "Copy to Public" or "Share with users (comma-separated IDs)"
+- Uses custom `window` event `code-library-updated` to refresh list after save
+
+### `src/components/layout/InstructionsLibraryPanel.tsx`
+
+Collapsible panel in the right sidebar. Lists saved instruction templates. On load:
+1. Fetches the instruction text from the backend
+2. Calls the code cache API to check if code was previously generated for this label
+3. If cache hit: calls `loadCachedState(rawInstructions, refinedPrompt, label)` to restore full state
+4. If no cache: calls `setRawInstructions(text)` + `resetRefined()` + `resetCode()`
+
+Key behaviours:
+- Collapsible with open/close chevron
+- Searchable list
+- Delete with confirmation
+- Listens to `instructions-library-updated` custom window event to refresh
+
+### `src/components/layout/FileSummaryModal.tsx`
+
+Modal overlay showing per-column statistics for the uploaded file. Triggered by the "File Summary" button in the Pilot sidebar.
+
+Props: `{ sessionId, filename, onClose }`
+
+Fetches `GET /api/v1/session/{sessionId}/summary` on mount. Displays a table with columns: Field name, Type, Records, Nulls, With Values, Uniques, Key?, Min, Max.
+
+---
+
+## 17. App Layout — `src/App.tsx`
+
+The app uses a **3-panel layout** (`flex h-screen`):
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  AppHeader + WorkflowStepper           (top bar, flex-shrink-0)  │
+├──────────────┬─────────────────────────┬─────────────────────────┤
+│ PilotSidebar │    MainContent          │    CodeSidebar          │
+│ (w-72)       │    (flex-1,             │    (w-80)               │
+│              │     overflow-y-auto)    │                         │
+│ Data         │                         │ Engineering Workspace   │
+│ Workspace    │ - InstructionPanel      │ - Source Console toggle │
+│              │ - CodeGenPanel          │ - InstructionsLibrary   │
+│ - Dataset    │   (when showCode=true)  │ - CodeLibraryPanel      │
+│   Details    │ - ExecutionPanel        │                         │
+│ - FileUpload │   (after execution)     │                         │
+│   Zone       │                         │                         │
+└──────────────┴─────────────────────────┴─────────────────────────┘
+```
+
+Key layout details:
+- `PilotSidebar` (left, `w-72`): Dataset Details collapsible + Data Ingestion (Manual) collapsible with `FileUploadZone`. "File Summary" and "Re-upload" buttons in Dataset Details header.
+- `MainContent` (center, `flex-1`): Instruction Panel always shown after upload. `CodeGenPanel` shown only when `showCode=true` (Source Console toggle). `ExecutionPanel` shown after `status === 'success' | 'error'`.
+- `CodeSidebar` (right, `w-80`): Engineering Workspace header. Source Console toggle switch (controls `showCode`). `InstructionsLibraryPanel` + `CodeLibraryPanel`.
+- `FileSummaryModal` renders as an overlay portal when "File Summary" clicked.
 
 ```typescript
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Toaster } from 'sonner'
-// ... component imports
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries:   { retry: 1, staleTime: 30_000 },
-    mutations: { retry: 0 },
-  },
-})
-
-// StepHeading sub-component: numbered blue badge + title + subtitle
-function StepHeading({ number, title, subtitle }) { ... }
-
-function MainContent() {
-  const { sessionId, currentStep } = useSessionStore()
-  return (
-    <main className="mx-auto max-w-7xl px-6 py-8 space-y-8">
-      <section>                              {/* always visible */}
-        <StepHeading number={1} title="Upload Data" ... />
-        <FileUploadZone />
-      </section>
-
-      {sessionId && (                        {/* unlocked after upload */}
-        <section>
-          <StepHeading number={2} title="Write & Refine Instructions" ... />
-          <InstructionPanel />
-        </section>
-      )}
-
-      {currentStep >= 3 && (                 {/* unlocked after refine */}
-        <section>
-          <StepHeading number={3} title="Generate Python Code" ... />
-          <CodeGenPanel />
-        </section>
-      )}
-
-      {currentStep >= 4 && (                 {/* unlocked after generate */}
-        <section>
-          <StepHeading number={4} title="Execute & Download" ... />
-          <ExecutionPanel />
-        </section>
-      )}
-    </main>
-  )
-}
-
 export default function App() {
+  const [showCode, setShowCode] = useState(false)
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-background">
-        <AppHeader />
-        <WorkflowStepper />
-        <MainContent />
+      <div className="flex h-screen flex-col overflow-hidden bg-background">
+        <div className="flex-shrink-0 z-20">
+          <AppHeader />
+          <WorkflowStepper />
+        </div>
+        <div className="flex flex-1 overflow-hidden">
+          <PilotSidebar />
+          <MainContent codeStudioOpen={showCode} />
+          <CodeSidebar showCode={showCode} setShowCode={setShowCode} />
+        </div>
       </div>
       <Toaster richColors position="top-right" />
     </QueryClientProvider>
