@@ -87,6 +87,7 @@ def _validate_startup(settings: Settings) -> None:
     dirs_to_check = [
         ("INBOUND_DIR", settings.INBOUND_DIR),
         ("TEMP_DIR",    settings.TEMP_DIR),
+        ("CODE_LIBRARY_DIR", settings.CODE_LIBRARY_DIR),
         ("LOG_DIR",     settings.LOG_DIR),
     ]
     for dir_name, dir_path in dirs_to_check:

@@ -7,12 +7,15 @@ import { toastError, toastInfo } from '@/utils/toast'
 
 export function useInstructionRefine() {
   const [isRefining, setIsRefining] = useState(false)
-  const { sessionId } = useSessionStore()
-  const { rawInstructions, appendRefinedChunk, resetRefined, setIsRefining: storeSetRefining } =
+  const { appendRefinedChunk, resetRefined, setIsRefining: storeSetRefining } =
     useInstructionStore()
   const { advanceStep } = useSessionStore()
 
   const refine = async () => {
+    // Read fresh from store at call time — avoids stale closure when instructions
+    // are updated programmatically just before refine() is called
+    const rawInstructions = useInstructionStore.getState().rawInstructions
+    const sessionId = useSessionStore.getState().sessionId
     if (!sessionId || !rawInstructions.trim()) return
     setIsRefining(true)
     storeSetRefining(true)

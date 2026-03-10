@@ -8,11 +8,12 @@ import { toastError, toastInfo } from '@/utils/toast'
 
 export function useCodeGeneration() {
   const [isGenerating, setIsGenerating] = useState(false)
-  const { sessionId, advanceStep } = useSessionStore()
-  const { refinedPrompt } = useInstructionStore()
+  const { advanceStep } = useSessionStore()
   const { appendCodeChunk, resetCode, setIsGenerating: storeSetGenerating } = useCodeStore()
 
   const generateCode = async () => {
+    const sessionId = useSessionStore.getState().sessionId
+    const refinedPrompt = useInstructionStore.getState().refinedPrompt
     if (!sessionId || !refinedPrompt.trim()) return
     setIsGenerating(true)
     storeSetGenerating(true)

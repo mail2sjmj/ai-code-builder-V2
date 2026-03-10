@@ -1,40 +1,80 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Loader2, Play, Sparkles } from 'lucide-react'
+import { BookmarkPlus, ChevronDown, ChevronRight, Loader2, Play } from 'lucide-react'
 import { useInstructionRefine } from '@/hooks/useInstructionRefine'
 import { useCodeGeneration } from '@/hooks/useCodeGeneration'
 import { useCodeExecution } from '@/hooks/useCodeExecution'
 import { useCodeStore } from '@/store/codeStore'
 import { useInstructionStore } from '@/store/instructionStore'
 import { useSessionStore } from '@/store/sessionStore'
+import { apiPost } from '@/services/apiClient'
+import { toastError, toastSuccess } from '@/utils/toast'
 import { RawInstructionBox, SKIP_INSTRUCTION } from './RawInstructionBox'
 import { cn } from '@/lib/utils'
+import type { SaveInstructionLibraryRequest, SaveInstructionLibraryResponse } from '@/types/api.types'
 
 export function InstructionPanel() {
   const [logOpen, setLogOpen] = useState(false)
   const [showAIGeneratedPrompt, setShowAIGeneratedPrompt] = useState(false)
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [saveLabel, setSaveLabel] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [duplicateWarning, setDuplicateWarning] = useState(false)
+
   const { refine, isRefining } = useInstructionRefine()
   const { generateCode, isGenerating } = useCodeGeneration()
   const { executeCode, isExecuting } = useCodeExecution()
   const rawInstructions = useInstructionStore((s) => s.rawInstructions)
   const refinedPrompt = useInstructionStore((s) => s.refinedPrompt)
+  const isFromCache = useInstructionStore((s) => s.isFromCache)
+  const setActiveSavedLabel = useInstructionStore((s) => s.setActiveSavedLabel)
   const generatedCode = useCodeStore((s) => s.generatedCode)
   const sessionId = useSessionStore((s) => s.sessionId)
+  const setCurrentStep = useSessionStore((s) => s.setCurrentStep)
 
   const skipSelected = rawInstructions.trim() === SKIP_INSTRUCTION
-  const canBuild = !!sessionId && rawInstructions.trim().length >= 20 && !isRefining && !isGenerating
-  const canExecute = (!!generatedCode || skipSelected) && !isExecuting && !isRefining && !isGenerating
+  const canExecute = !!sessionId && (skipSelected || rawInstructions.trim().length >= 20) && !isRefining && !isGenerating && !isExecuting
+  const canSave = rawInstructions.trim().length >= 1 && !skipSelected
   const hasRefinedOutput = refinedPrompt.trim().length > 0
 
-  const handleBuildCode = async () => {
-    await refine()
-    await generateCode()
-  }
-
   const handleExecute = async () => {
-    if (!generatedCode && skipSelected) {
-      await handleBuildCode()
+    if (!skipSelected && !isFromCache) {
+      setCurrentStep(2)
+      await refine()
+      await generateCode()
     }
     await executeCode()
+  }
+
+  const saveToLibrary = async (overwrite = false) => {
+    const label = saveLabel.trim()
+    if (!label) {
+      toastError('Please provide a label for the instruction.')
+      return
+    }
+    setIsSaving(true)
+    setDuplicateWarning(false)
+    try {
+      const payload: SaveInstructionLibraryRequest = {
+        instruction: rawInstructions,
+        label,
+        overwrite,
+      }
+      await apiPost<SaveInstructionLibraryResponse>('/instructions-library/save', payload)
+      window.dispatchEvent(new Event('instructions-library-updated'))
+      setActiveSavedLabel(label)
+      toastSuccess('Instruction saved to Instructions Library.')
+      setSaveOpen(false)
+      setSaveLabel('')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      if (msg.includes('[LABEL_EXISTS]')) {
+        setDuplicateWarning(true)
+      } else {
+        toastError(msg || 'Failed to save instruction.')
+      }
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const stages = [
@@ -138,49 +178,104 @@ export function InstructionPanel() {
         <RawInstructionBox />
       </div>
 
-      <div className="flex justify-center gap-3">
+      <div className="flex items-center justify-center gap-3">
         <button
-          onClick={() => void handleBuildCode()}
-          disabled={!canBuild}
-          className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground shadow transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => { setSaveOpen(true); setDuplicateWarning(false) }}
+          disabled={!canSave}
+          className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-opacity hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          title="Save instruction to library"
         >
-          {isRefining || isGenerating ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Building...
-            </>
-          ) : (
-            <>
-              <Sparkles className="h-4 w-4" />
-              Build Code
-            </>
-          )}
+          <BookmarkPlus className="h-4 w-4" />
+          Save
         </button>
 
         <button
           onClick={() => void handleExecute()}
           disabled={!canExecute}
-          className={cn(
-            'flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium text-white shadow transition-opacity',
-            skipSelected
-              ? 'bg-green-600 ring-2 ring-offset-1 ring-green-400 hover:bg-green-700'
-              : 'bg-green-600 hover:bg-green-700',
-            'disabled:cursor-not-allowed disabled:opacity-40',
-          )}
+          className="flex items-center gap-2 rounded-lg bg-green-600 px-8 py-2.5 text-sm font-medium text-white shadow transition-opacity hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {isExecuting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Executing...
-            </>
+          {isRefining ? (
+            <><Loader2 className="h-4 w-4 animate-spin" />Refining...</>
+          ) : isGenerating ? (
+            <><Loader2 className="h-4 w-4 animate-spin" />Generating...</>
+          ) : isExecuting ? (
+            <><Loader2 className="h-4 w-4 animate-spin" />Executing...</>
           ) : (
-            <>
-              <Play className="h-4 w-4" />
-              Execute
-            </>
+            <><Play className="h-4 w-4" />Execute</>
           )}
         </button>
       </div>
+
+      {/* Save to Instructions Library — modal */}
+      {saveOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/40"
+            onClick={() => !isSaving && setSaveOpen(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-sm rounded-lg border border-border bg-white shadow-xl">
+              <div className="border-b border-border bg-[#1e3a5f] px-5 py-3 rounded-t-lg">
+                <p className="text-sm font-semibold text-slate-100">Save to Instructions Library</p>
+              </div>
+              <div className="px-5 py-4 space-y-4">
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Label</p>
+                  <input
+                    type="text"
+                    value={saveLabel}
+                    onChange={(e) => { setSaveLabel(e.target.value); setDuplicateWarning(false) }}
+                    placeholder="Enter a label for this instruction..."
+                    autoFocus
+                    className="w-full rounded border border-border bg-slate-50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                {duplicateWarning && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5">
+                    <p className="mb-2 text-xs font-semibold text-amber-800">
+                      An instruction with this label already exists. Override it?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => void saveToLibrary(true)}
+                        disabled={isSaving}
+                        className="rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        Yes, Override
+                      </button>
+                      <button
+                        onClick={() => setDuplicateWarning(false)}
+                        className="rounded border border-amber-400 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+                <button
+                  onClick={() => { setSaveOpen(false); setDuplicateWarning(false) }}
+                  disabled={isSaving}
+                  className="rounded border border-border px-4 py-1.5 text-sm font-medium text-foreground hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                {!duplicateWarning && (
+                  <button
+                    onClick={() => void saveToLibrary()}
+                    disabled={isSaving}
+                    className="rounded bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    {isSaving ? 'Saving...' : 'Save'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

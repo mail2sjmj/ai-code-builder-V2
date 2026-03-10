@@ -43,12 +43,23 @@ class Settings(BaseSettings):
     # ── File Upload ───────────────────────────────────────────────────────────
     MAX_UPLOAD_SIZE_MB: int = Field(default=50, ge=1, le=500)
     ALLOWED_EXTENSIONS: list[str] = Field(default=[".csv", ".xlsx"])
+    METADATA_SAMPLE_DEFAULT_ROWS: int = Field(default=100, ge=1, le=100_000)
+    METADATA_SAMPLE_MAX_ROWS: int = Field(default=5_000, ge=1, le=1_000_000)
 
     # Inbound: where uploaded files (original + parquet cache) are stored.
     # Separate from TEMP_DIR so long-lived session data and ephemeral
     # sandbox artifacts can be placed on different storage volumes.
     INBOUND_DIR: str = Field(
         default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_inbound")
+    )
+    CODE_LIBRARY_DIR: str = Field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_library")
+    )
+    INSTRUCTIONS_LIBRARY_DIR: str = Field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_instructions")
+    )
+    CODE_CACHE_DIR: str = Field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "code_builder_code_cache")
     )
 
     SESSION_TTL_SECONDS: int = Field(default=3600, ge=60)
@@ -78,9 +89,12 @@ class Settings(BaseSettings):
 
     # ── Anthropic AI ──────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = Field(default="", description="Required in production")
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
-    REFINE_MAX_TOKENS: int = Field(default=2048, ge=256, le=8192)
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"  # legacy fallback; prefer REFINE_MODEL / CODEGEN_MODEL
+    REFINE_MODEL: str = Field(default="claude-haiku-4-5-20251001")   # fast model for prompt expansion
+    CODEGEN_MODEL: str = Field(default="claude-haiku-4-5-20251001")  # fast model; override to claude-sonnet-4-6 for complex tasks
+    REFINE_MAX_TOKENS: int = Field(default=600, ge=256, le=4096)
     CODEGEN_MAX_TOKENS: int = Field(default=8192, ge=1024, le=32768)
+    CODEGEN_SAMPLE_ROWS: int = Field(default=3, ge=1, le=100)
     AI_TEMPERATURE: float = Field(default=0.2, ge=0.0, le=1.0)
     AI_REQUEST_TIMEOUT_SECONDS: int = Field(default=120, ge=10, le=600)
     AI_MAX_RETRIES: int = Field(default=5, ge=0, le=10)
@@ -185,10 +199,11 @@ def get_settings() -> Settings:
 
     loaded = ", ".join(f for f in env_files if Path(f).exists())
     logger.info(
-        "Settings loaded: env=%s files=[%s] version=%s model=%s",
+        "Settings loaded: env=%s files=[%s] version=%s refine_model=%s codegen_model=%s",
         settings.APP_ENV,
         loaded,
         settings.APP_VERSION,
-        settings.ANTHROPIC_MODEL,
+        settings.REFINE_MODEL,
+        settings.CODEGEN_MODEL,
     )
     return settings

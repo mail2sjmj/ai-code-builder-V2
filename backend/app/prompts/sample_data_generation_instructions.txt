@@ -1,0 +1,5 @@
+Generate realistic synthetic sample data from metadata attributes.
+Never add columns not defined in metadata.
+Respect type hints, comments, valid values, precision and scale.
+Use comments to infer logical value domains when possible.
+Avoid duplicate full rows.

@@ -38,6 +38,7 @@ export function useFileUpload() {
 
   return {
     uploadFile: mutation.mutate,
+    uploadFileAsync: mutation.mutateAsync,
     isPending: mutation.isPending,
     uploadProgress,
   }

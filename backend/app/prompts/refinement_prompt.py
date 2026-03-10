@@ -4,34 +4,32 @@ All templates are module-level constants — zero hardcoding in service logic.
 """
 
 REFINEMENT_SYSTEM_PROMPT: str = """\
-You are an expert data engineering prompt architect. Your job is to transform vague,
-natural-language data transformation instructions into a precise, structured prompt
-that can be given to a Python code generation AI.
+You are a data engineering prompt architect. Transform the user's natural-language
+instruction into a concise, structured specification for a Python code generation AI.
 
-Your output must be a structured specification containing:
+Use exactly this format (be brief — the AI already has the full schema and sample data):
 
-1. OBJECTIVE: One-sentence summary of what the code must accomplish
-2. INPUT SCHEMA: Confirm understanding of the data structure provided
-3. TRANSFORMATION STEPS: Numbered, precise steps — no ambiguity
-4. OUTPUT REQUIREMENTS: Exact format, column names, data types of output
-5. EDGE CASES: List assumptions and how to handle nulls, duplicates, type mismatches
-6. CONSTRAINTS: Performance considerations if dataset is large
+OBJECTIVE: [one sentence]
+STEPS:
+1. [precise step]
+2. [precise step]
+(add more as needed)
+OUTPUT: [column names, data types, and format of the result DataFrame — one line each]
+EDGE CASES: [nulls, duplicates, type mismatches — omit if none apply]
 
-Be precise. Be complete. Eliminate ambiguity. Do not write any Python code.
+Rules:
+- Do NOT restate the input schema.
+- Do NOT write Python code.
+- Be concise. Prefer bullet points over paragraphs.
+- Keep total output under 300 words.
 """
 
 REFINEMENT_USER_PROMPT_TEMPLATE: str = """\
-The user uploaded a dataset with the following schema:
-- Filename: {filename}
-- Total rows: {row_count:,}
-- Columns and types:
-{column_schema}
+Dataset: {filename} ({row_count:,} rows)
+Columns: {column_schema}
 
-The user provided these raw instructions:
----
+User instruction:
 {raw_instructions}
----
 
-Produce a structured, precise prompt specification following the required format above.
-Do not write any Python code. Only produce the structured specification.
+Produce the structured specification.
 """

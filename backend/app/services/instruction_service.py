@@ -15,6 +15,7 @@ from app.prompts.refinement_prompt import (
 )
 from app.session.session_store import SessionStore
 from app.utils.ai_retry import anthropic_stream_with_retry
+from app.utils.anthropic_client import get_anthropic_client
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +53,15 @@ async def stream_instruction_refinement(
         raw_instructions=raw_instructions,
     )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = get_anthropic_client(settings.ANTHROPIC_API_KEY)
 
     def make_stream():
         return client.messages.stream(
-            model=settings.ANTHROPIC_MODEL,
+            model=settings.REFINE_MODEL,
             max_tokens=settings.REFINE_MAX_TOKENS,
-            system=REFINEMENT_SYSTEM_PROMPT,
+            system=[{"type": "text", "text": REFINEMENT_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user_prompt}],
+            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
         )
 
     try:
