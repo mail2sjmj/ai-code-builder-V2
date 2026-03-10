@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         "AI Code Builder started: version=%s env=%s model=%s log=%s/app.%s.log",
         settings.APP_VERSION,
         settings.APP_ENV,
-        settings.ANTHROPIC_MODEL,
+        settings.LEGACY_MODEL,
         settings.LOG_DIR,
         settings.APP_ENV,
     )

@@ -94,7 +94,7 @@ class Settings(BaseSettings):
 
     # ── Anthropic AI ──────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = Field(default="", description="Required in production")
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"  # legacy fallback; prefer REFINE_MODEL / CODEGEN_MODEL
+    LEGACY_MODEL: str = "claude-sonnet-4-6"  # legacy fallback; prefer REFINE_MODEL / CODEGEN_MODEL
     REFINE_MODEL: str = Field(default="claude-haiku-4-5-20251001")   # fast model for prompt expansion
     CODEGEN_MODEL: str = Field(default="claude-haiku-4-5-20251001")  # fast model; override to claude-sonnet-4-6 for complex tasks
     REFINE_MAX_TOKENS: int = Field(default=600, ge=256, le=4096)

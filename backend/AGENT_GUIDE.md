@@ -253,7 +253,7 @@ LOG_BACKUP_COUNT=5
 
 # ── Anthropic AI — REQUIRED ───────────────────────────────────────────────────
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-6       # legacy fallback; prefer REFINE_MODEL / CODEGEN_MODEL
+LEGACY_MODEL=claude-sonnet-4-6       # legacy fallback; prefer REFINE_MODEL / CODEGEN_MODEL
 REFINE_MODEL=claude-haiku-4-5-20251001  # fast model for prompt expansion
 CODEGEN_MODEL=claude-haiku-4-5-20251001 # fast model for code generation
 REFINE_MAX_TOKENS=1024
@@ -351,7 +351,7 @@ class Settings(BaseSettings):
 
     # ── Anthropic AI ──────────────────────────────────────────────────────
     ANTHROPIC_API_KEY:          str   = Field(default="")
-    ANTHROPIC_MODEL:            str   = "claude-sonnet-4-6"   # legacy fallback
+    LEGACY_MODEL:            str   = "claude-sonnet-4-6"   # legacy fallback
     REFINE_MODEL:               str   = Field(default="claude-haiku-4-5-20251001")
     CODEGEN_MODEL:              str   = Field(default="claude-haiku-4-5-20251001")
     REFINE_MAX_TOKENS:          int   = Field(default=1024,  ge=256,  le=4096)
@@ -426,7 +426,7 @@ def get_settings() -> Settings:
     settings = Settings(_env_file=env_files)  # type: ignore[call-arg]
     logger.info(
         "Settings loaded: env=%s files=%s model=%s",
-        settings.APP_ENV, env_files, settings.ANTHROPIC_MODEL,
+        settings.APP_ENV, env_files, settings.LEGACY_MODEL,
     )
     return settings
 ```
@@ -1146,7 +1146,7 @@ async def stream_refined_instructions(
     user_prompt = build_user_prompt(raw_instructions, session.columns)
 
     async with _client.messages.stream(
-        model=settings.ANTHROPIC_MODEL,
+        model=settings.LEGACY_MODEL,
         max_tokens=settings.REFINE_MAX_TOKENS,
         temperature=settings.AI_TEMPERATURE,
         system=SYSTEM_PROMPT,
@@ -1194,7 +1194,7 @@ async def stream_generated_code(
 
     buffer = ""
     async with _client.messages.stream(
-        model=settings.ANTHROPIC_MODEL,
+        model=settings.LEGACY_MODEL,
         max_tokens=settings.CODEGEN_MAX_TOKENS,
         temperature=settings.AI_TEMPERATURE,
         system=SYSTEM_PROMPT,
@@ -1223,7 +1223,7 @@ async def stream_fixed_code(
     )
 
     async with _client.messages.stream(
-        model=settings.ANTHROPIC_MODEL,
+        model=settings.LEGACY_MODEL,
         max_tokens=settings.CODEGEN_MAX_TOKENS,
         temperature=settings.AI_TEMPERATURE,
         system=SYSTEM_PROMPT,
@@ -1765,6 +1765,6 @@ The application enforces four independent security layers for code execution:
 | Forgetting `X-Accel-Buffering: no` on SSE | Nginx buffers SSE by default; this header disables it |
 | Running user code in-process | Always use a subprocess; never `exec()` user code in the FastAPI process |
 | Storing sessions in a database | In-memory `SessionStore` is intentional — it's stateless per restart by design |
-| Hard-coding the Anthropic model | Always read `settings.ANTHROPIC_MODEL`; the model name changes over time |
+| Hard-coding the Anthropic model | Always read `settings.LEGACY_MODEL`; the model name changes over time |
 | Missing `ALLOWED_ORIGINS` for the frontend port | CORS will block all browser requests if the frontend origin is not listed |
 | Not stripping markdown fences from LLM output | Claude sometimes wraps code in ` ```python ` despite instructions; always strip |
