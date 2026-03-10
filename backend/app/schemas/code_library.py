@@ -11,6 +11,7 @@ class SaveCodeRequest(BaseModel):
     code: str = Field(min_length=1)
     label: str = Field(min_length=1, max_length=120)
     visibility: Literal["public", "private"]
+    overwrite: bool = False
 
 
 class SaveCodeResponse(BaseModel):
@@ -32,3 +33,31 @@ class CodeLibraryListResponse(BaseModel):
 
     visibility: Literal["public", "private"]
     items: list[CodeLibraryItem]
+
+
+class ShareToPublicResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str
+    message: str
+
+
+class ShareToUsersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_ids: list[str] = Field(min_length=1)
+
+
+class ShareToUsersResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str
+    shared_to: list[str]
+
+
+class CodeContentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str
+    visibility: Literal["public", "private"]
+    code: str

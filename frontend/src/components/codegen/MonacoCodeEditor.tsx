@@ -7,7 +7,7 @@ import appConfig from '@/config/app.config'
 
 export function MonacoCodeEditor() {
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null)
-  const { editedCode, isGenerating, setEditedCode } = useCodeStore()
+  const { editedCode, isGenerating, loadKey, setEditedCode } = useCodeStore()
 
   const handleMount: OnMount = (editor) => {
     editorRef.current = editor
@@ -16,6 +16,7 @@ export function MonacoCodeEditor() {
   return (
     <div className="relative" style={{ height: '400px' }}>
       <Editor
+        key={loadKey}
         value={editedCode}
         language={appConfig.editor.language}
         theme={appConfig.editor.theme}

@@ -15,6 +15,7 @@ interface ExecutionState {
   setStatus: (status: ExecutionStatus) => void
   setResults: (rows: Record<string, unknown>[], columns: string[], timeMs: number | null) => void
   setError: (msg: string) => void
+  clearError: () => void
   reset: () => void
 }
 
@@ -30,8 +31,9 @@ export const useExecutionStore = create<ExecutionState>((set) => ({
   setSessionId: (id) => set({ sessionId: id }),
   setStatus: (status) => set({ status }),
   setResults: (rows, columns, timeMs) =>
-    set({ previewRows: rows, previewColumns: columns, executionTimeMs: timeMs, status: 'success' }),
+    set({ previewRows: rows, previewColumns: columns, executionTimeMs: timeMs, status: 'success', errorMessage: null }),
   setError: (msg) => set({ errorMessage: msg, status: 'error' }),
+  clearError: () => set({ errorMessage: null }),
   reset: () =>
     set({
       jobId: null,

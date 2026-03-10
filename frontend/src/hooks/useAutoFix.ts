@@ -3,12 +3,12 @@ import appConfig from '@/config/app.config'
 import { useCodeStore } from '@/store/codeStore'
 import { useExecutionStore } from '@/store/executionStore'
 import { parseSSEStream } from '@/utils/streamParser'
-import { toastError, toastSuccess } from '@/utils/toast'
+import { toastDismissAll, toastError, toastSuccess } from '@/utils/toast'
 
 export function useAutoFix() {
   const [isFixing, setIsFixing] = useState(false)
   const { setEditedCode } = useCodeStore()
-  const { setStatus } = useExecutionStore()
+  const { clearError } = useExecutionStore()
 
   const autoFix = async (
     sessionId: string,
@@ -51,7 +51,8 @@ export function useAutoFix() {
           setEditedCode(accumulated)
         },
         () => {
-          setStatus('idle')
+          toastDismissAll()
+          clearError()
           toastSuccess('Code fixed — review the changes and run again.')
           setIsFixing(false)
         },

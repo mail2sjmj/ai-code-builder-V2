@@ -19,12 +19,13 @@ from app.prompts.codegen_prompt import (
     CODEGEN_USER_PROMPT_TEMPLATE,
 )
 from app.session.session_store import SessionStore
-from app.utils.ai_retry import anthropic_accumulate_with_retry
+from app.utils.ai_retry import anthropic_accumulate_with_retry, anthropic_stream_with_retry
+from app.utils.anthropic_client import get_anthropic_client
 
 logger = logging.getLogger(__name__)
 
 # Fence patterns to strip from streaming output
-_OPENING_FENCES = ("```python", "```py", "```")
+_OPENING_FENCES = frozenset({"```python", "```py", "```"})
 _CLOSING_FENCE = "```"
 
 
@@ -38,6 +39,32 @@ def _strip_fences(text: str) -> str:
     return "\n".join(lines)
 
 
+async def _stream_fenceless(text_stream: AsyncIterator[str]) -> AsyncIterator[str]:
+    """
+    Pass-through stream filter that drops opening and closing markdown fence lines.
+
+    Buffers incoming deltas into complete lines, then emits each line — skipping
+    the first line if it is a fence opener (e.g. ```python) and the final partial
+    line if it is a fence closer (```).
+    """
+    line_buf = ""
+    is_first_line = True
+
+    async for delta in text_stream:
+        line_buf += delta
+        while "\n" in line_buf:
+            line, line_buf = line_buf.split("\n", 1)
+            if is_first_line:
+                is_first_line = False
+                if line.strip() in _OPENING_FENCES:
+                    continue  # drop opening fence
+            yield line + "\n"
+
+    # Flush the final partial line (no trailing \n); drop if it is a closing fence
+    if line_buf and line_buf.strip() != _CLOSING_FENCE:
+        yield line_buf
+
+
 async def stream_code_generation(
     session_id: str,
     refined_prompt: str,
@@ -45,10 +72,10 @@ async def stream_code_generation(
     settings: Settings,
 ) -> AsyncIterator[str]:
     """
-    Stream generated Python code from Anthropic Claude.
+    Stream generated Python code from Anthropic Claude in real time.
 
     Yields:
-        Code text (full, after fence-stripping).
+        Code text deltas as they arrive, with markdown fences filtered out.
     Raises:
         HTTPException 404 if session not found.
         HTTPException 429 if rate-limited after all retries exhausted.
@@ -81,19 +108,22 @@ async def stream_code_generation(
         sample_data_json=sample_data_json,
     )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = get_anthropic_client(settings.ANTHROPIC_API_KEY)
 
     def make_stream():
         return client.messages.stream(
-            model=settings.ANTHROPIC_MODEL,
+            model=settings.CODEGEN_MODEL,
             max_tokens=settings.CODEGEN_MAX_TOKENS,
-            system=CODEGEN_SYSTEM_PROMPT,
+            system=[{"type": "text", "text": CODEGEN_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user_prompt}],
+            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
         )
 
     try:
-        raw = await anthropic_accumulate_with_retry(make_stream, max_retries=settings.AI_MAX_RETRIES)
-        yield _strip_fences(raw)
+        async for chunk in _stream_fenceless(
+            anthropic_stream_with_retry(make_stream, max_retries=settings.AI_MAX_RETRIES)
+        ):
+            yield chunk
     except anthropic.RateLimitError as exc:
         logger.warning("Anthropic rate limit exhausted after %d retries: %s", settings.AI_MAX_RETRIES, exc)
         raise HTTPException(
@@ -137,14 +167,15 @@ async def stream_code_fix(
         error_message=error_message,
     )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = get_anthropic_client(settings.ANTHROPIC_API_KEY)
 
     def make_stream():
         return client.messages.stream(
-            model=settings.ANTHROPIC_MODEL,
+            model=settings.CODEGEN_MODEL,
             max_tokens=settings.CODEGEN_MAX_TOKENS,
-            system=AUTOFIX_SYSTEM_PROMPT,
+            system=[{"type": "text", "text": AUTOFIX_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user_prompt}],
+            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
         )
 
     try:

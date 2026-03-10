@@ -2,12 +2,13 @@
 
 import logging
 
+import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.api.dependencies import deps_session_store, deps_settings
 from app.config.settings import Settings
-from app.schemas.upload import MetadataPreviewResponse, UploadResponse
+from app.schemas.upload import ColumnSummary, ColumnValuesResponse, FileSummaryResponse, MetadataPreviewResponse, UploadResponse
 from app.services.file_service import (
     generate_sample_csv_from_metadata,
     parse_uploaded_file,
@@ -114,3 +115,97 @@ async def generate_metadata_sample(
         media_type=media_type,
         filename=download_name,
     )
+
+
+_NUMERIC_DTYPES = {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float16", "float32", "float64"}
+
+
+def _is_numeric_dtype(dtype_str: str) -> bool:
+    return any(n in dtype_str.lower() for n in ("int", "float"))
+
+
+@router.get(
+    "/session/{session_id}/summary",
+    response_model=FileSummaryResponse,
+    summary="Get column-level summary statistics",
+    description="Computes per-column stats (nulls, uniques, min/max) from the uploaded file.",
+)
+async def get_file_summary(
+    session_id: str,
+    session_store: SessionStore = Depends(deps_session_store),
+) -> FileSummaryResponse:
+    session = await session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail={"error_code": "SESSION_NOT_FOUND", "message": "Session not found."})
+
+    df: pd.DataFrame = pd.read_parquet(session.parquet_path)
+    row_count = len(df)
+
+    column_summaries: list[ColumnSummary] = []
+    for col in session.columns:
+        dtype_str = session.dtypes.get(col, "object")
+        series = df[col]
+        null_count = int(series.isna().sum())
+        unique_count = int(series.nunique(dropna=True))
+        is_key = "Yes" if unique_count > 50 else "No"
+        min_val: str | None = None
+        max_val: str | None = None
+        if _is_numeric_dtype(dtype_str):
+            numeric = pd.to_numeric(series, errors="coerce")
+            min_val = str(numeric.min()) if not numeric.isna().all() else None
+            max_val = str(numeric.max()) if not numeric.isna().all() else None
+
+        column_summaries.append(
+            ColumnSummary(
+                column=col,
+                dtype=dtype_str,
+                record_count=row_count,
+                null_count=null_count,
+                count_with_values=row_count - null_count,
+                unique_count=unique_count,
+                is_key_column=is_key,
+                min_value=min_val,
+                max_value=max_val,
+            )
+        )
+
+    return FileSummaryResponse(
+        session_id=session_id,
+        filename=session.filename,
+        columns=column_summaries,
+    )
+
+
+_MAX_FULL_VALUES = 20
+_SAMPLE_COUNT = 5
+
+
+@router.get(
+    "/session/{session_id}/column-values",
+    response_model=ColumnValuesResponse,
+    summary="Get sample values for a column",
+    description="Returns up to 20 unique values, or 5 random samples if unique count > 20.",
+)
+async def get_column_values(
+    session_id: str,
+    column: str,
+    session_store: SessionStore = Depends(deps_session_store),
+) -> ColumnValuesResponse:
+    session = await session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail={"error_code": "SESSION_NOT_FOUND", "message": "Session not found."})
+    if column not in session.columns:
+        raise HTTPException(status_code=422, detail={"error_code": "INVALID_COLUMN", "message": f"Column '{column}' not found."})
+
+    df: pd.DataFrame = pd.read_parquet(session.parquet_path, columns=[column])
+    series = df[column].dropna()
+    unique_count = series.nunique()
+
+    if unique_count <= _MAX_FULL_VALUES:
+        values = [str(v) for v in series.unique()[:_MAX_FULL_VALUES]]
+        is_sample = False
+    else:
+        values = [str(v) for v in series.sample(n=_SAMPLE_COUNT, random_state=42).tolist()]
+        is_sample = True
+
+    return ColumnValuesResponse(column=column, values=values, is_sample=is_sample)

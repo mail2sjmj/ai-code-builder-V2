@@ -72,7 +72,7 @@ def execute_code_in_sandbox(
     if sys.platform == "win32":
         python_dir = str(Path(sys.executable).parent)
         system_root = os.environ.get("SystemRoot", "C:\\Windows")
-        win_path = python_dir + ";" + os.path.join(system_root, "System32")
+        win_path = os.pathsep.join([python_dir, os.path.join(system_root, "System32")])
     else:
         win_path = ""
 
@@ -82,6 +82,10 @@ def execute_code_in_sandbox(
         "PATH": "/usr/bin:/bin" if sys.platform != "win32" else win_path,
         "PYTHONPATH": "",
         "PYTHONDONTWRITEBYTECODE": "1",
+        # Force UTF-8 for all I/O — prevents charmap errors on Windows when
+        # generated code prints Unicode characters (e.g. ✓, →, accented text).
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
     }
 
     start_time = time.monotonic()
@@ -91,6 +95,7 @@ def execute_code_in_sandbox(
             env=sandbox_env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout_seconds,
             cwd=str(exec_dir),
         )

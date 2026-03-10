@@ -11,3 +11,8 @@ export const toastError = (message: string): void => {
 export const toastInfo = (message: string): void => {
   toast.info(message, { duration: 5000 })
 }
+
+/** Dismiss all active toasts — call this on successful outcomes to clear lingering errors. */
+export const toastDismissAll = (): void => {
+  toast.dismiss()
+}

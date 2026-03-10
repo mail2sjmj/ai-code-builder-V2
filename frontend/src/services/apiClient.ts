@@ -39,6 +39,11 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return res.data
 }
 
+export async function apiDelete<T = void>(path: string): Promise<T> {
+  const res = await apiClient.delete<T>(path)
+  return res.data
+}
+
 export async function apiPostFormData<T>(
   path: string,
   formData: FormData,

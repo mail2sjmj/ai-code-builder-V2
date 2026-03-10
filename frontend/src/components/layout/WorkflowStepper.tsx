@@ -7,10 +7,10 @@ import { useSessionStore } from '@/store/sessionStore'
 import { cn } from '@/lib/utils'
 
 const STEPS = [
-  { id: 2, label: 'Instructions', description: 'Describe what you need' },
-  { id: 3, label: 'Refine', description: 'AI-enhanced prompt' },
-  { id: 4, label: 'Generate Code', description: 'Python script created' },
-  { id: 5, label: 'Execute', description: 'Run & download results' },
+  { id: 1, label: 'Instructions', description: 'Describe what you need' },
+  { id: 2, label: 'Refine', description: 'AI-enhanced prompt' },
+  { id: 3, label: 'Generate Code', description: 'Python script created' },
+  { id: 4, label: 'Execute', description: 'Run and view results' },
 ] as const
 
 // Circle diameter h-9 = 2.25rem; half aligns the bar to circle centers.
@@ -44,9 +44,9 @@ export function WorkflowStepper() {
   const generateStartRef = useRef<number | null>(null)
   const executeStartRef = useRef<number | null>(null)
 
-  // Step 2 timing: from entering step 2 until we move past it.
+  // Step 1 timing: from entering step 1 until we move past it.
   useEffect(() => {
-    if (currentStep === 1) {
+    if (currentStep === 0) {
       setDurations({})
       instructionsStartRef.current = null
       refineStartRef.current = null
@@ -55,18 +55,18 @@ export function WorkflowStepper() {
       return
     }
 
-    if (currentStep === 2 && instructionsStartRef.current === null) {
+    if (currentStep === 1 && instructionsStartRef.current === null) {
       instructionsStartRef.current = Date.now()
     }
 
-    if (currentStep > 2 && instructionsStartRef.current !== null) {
-      const step2Ms = Date.now() - instructionsStartRef.current
-      setDurations((d) => ({ ...d, 2: step2Ms }))
+    if (currentStep > 1 && instructionsStartRef.current !== null) {
+      const step1Ms = Date.now() - instructionsStartRef.current
+      setDurations((d) => ({ ...d, 1: step1Ms }))
       instructionsStartRef.current = null
     }
   }, [currentStep])
 
-  // Step 3 timing: refine request lifecycle.
+  // Step 2 timing: refine request lifecycle.
   useEffect(() => {
     if (isRefining && refineStartRef.current === null) {
       refineStartRef.current = Date.now()
@@ -74,13 +74,13 @@ export function WorkflowStepper() {
     }
 
     if (!isRefining && refineStartRef.current !== null) {
-      const step3Ms = Date.now() - refineStartRef.current
-      setDurations((d) => ({ ...d, 3: step3Ms }))
+      const step2Ms = Date.now() - refineStartRef.current
+      setDurations((d) => ({ ...d, 2: step2Ms }))
       refineStartRef.current = null
     }
   }, [isRefining])
 
-  // Step 4 timing: generate request lifecycle.
+  // Step 3 timing: generate request lifecycle.
   useEffect(() => {
     if (isGenerating && generateStartRef.current === null) {
       generateStartRef.current = Date.now()
@@ -88,8 +88,8 @@ export function WorkflowStepper() {
     }
 
     if (!isGenerating && generateStartRef.current !== null) {
-      const step4Ms = Date.now() - generateStartRef.current
-      setDurations((d) => ({ ...d, 4: step4Ms }))
+      const step3Ms = Date.now() - generateStartRef.current
+      setDurations((d) => ({ ...d, 3: step3Ms }))
       generateStartRef.current = null
     }
   }, [isGenerating])
@@ -129,14 +129,16 @@ export function WorkflowStepper() {
   }, [anySpinning, isRefining, isGenerating])
 
   const isStepSpinning = (stepId: number): boolean => {
-    if (stepId === 3) return isRefining
-    if (stepId === 4) return isGenerating
-    if (stepId === 5) return executionStatus === 'queued' || executionStatus === 'running'
+    if (stepId === 2) return isRefining
+    if (stepId === 3) return isGenerating
+    if (stepId === 4) return executionStatus === 'queued' || executionStatus === 'running'
     return false
   }
 
   const getDuration = (stepId: number): number | null => {
-    const raw = stepId === 5 && executionTimeMs != null ? executionTimeMs : (durations[stepId] ?? null)
+    // Do not show elapsed time under "Instructions".
+    if (stepId === 1) return null
+    const raw = stepId === 4 && executionTimeMs != null ? executionTimeMs : (durations[stepId] ?? null)
     return normalizeDuration(raw)
   }
 
@@ -165,8 +167,9 @@ export function WorkflowStepper() {
 
           <div className="relative flex justify-between">
             {STEPS.map((step) => {
-              const isDone = step.id < currentStep
-              const isActive = step.id === currentStep
+              const isStep5Terminal = step.id === 4 && (executionStatus === 'success' || executionStatus === 'error')
+              const isDone = step.id < currentStep || isStep5Terminal
+              const isActive = step.id === currentStep && !isStep5Terminal
               const isPending = step.id > currentStep
               const spinning = isActive && isStepSpinning(step.id)
               const dur = getDuration(step.id)
@@ -178,7 +181,7 @@ export function WorkflowStepper() {
                       'relative flex h-9 w-9 items-center justify-center rounded-full border-2 text-sm font-bold transition-all duration-300',
                       isDone && 'border-green-500 bg-green-500 text-white shadow-md shadow-green-500/25',
                       spinning &&
-                        'border-yellow-400 bg-yellow-400 text-yellow-900 shadow-lg shadow-yellow-400/30 ring-4 ring-yellow-400/20',
+                        'border-primary bg-primary text-primary-foreground shadow-lg shadow-primary/30 ring-4 ring-primary/15',
                       isActive &&
                         !spinning &&
                         'border-primary bg-primary text-primary-foreground shadow-lg shadow-primary/30 ring-4 ring-primary/15',
@@ -204,7 +207,7 @@ export function WorkflowStepper() {
                       className={cn(
                         'hidden sm:block text-[10px] whitespace-nowrap transition-colors',
                         spinning
-                          ? 'text-yellow-600 font-medium'
+                          ? 'text-primary font-medium'
                           : isDone
                             ? 'text-green-600/70'
                             : isActive
@@ -216,7 +219,7 @@ export function WorkflowStepper() {
                     </span>
 
                     {spinning && (
-                      <span className="text-[10px] font-mono tabular-nums text-yellow-600">
+                      <span className="text-[10px] font-mono tabular-nums text-primary">
                         {formatDuration(elapsed)}
                       </span>
                     )}

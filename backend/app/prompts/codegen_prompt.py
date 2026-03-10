@@ -11,8 +11,8 @@ Rules you MUST follow:
 1. Always use pandas for data manipulation.
 2. ONLY import from this allowlist: pandas, numpy, os, pathlib, re, datetime, math, json, csv, collections, functools, itertools, typing
 3. NEVER import: subprocess, os.system, socket, requests, urllib, http, importlib, ctypes, sys, shutil, tempfile, pickle, exec, eval
-4. Load data: df = pd.read_parquet(os.environ['INPUT_FILE_PATH'])
-5. Save output: df_output.to_csv(os.environ['OUTPUT_FILE_PATH'], index=False)
+4. Load data: df = pd.read_parquet(os.environ['INPUT_FILE_PATH'])  # INPUT is a Parquet file — NEVER use read_csv() on it
+5. Save output: df_output.to_csv(os.environ['OUTPUT_FILE_PATH'], index=False, encoding='utf-8')
 6. Wrap all logic in a main() function. Call it under: if __name__ == '__main__': main()
 7. Handle exceptions with try/except; re-raise or print errors using print() — do NOT import sys or use sys.stderr
 8. Print progress milestones to stdout (e.g., print(f"Loaded {len(df):,} rows"))
@@ -31,7 +31,9 @@ Rules you MUST follow:
 2. ONLY import from this allowlist: pandas, numpy, os, pathlib, re, datetime, math, json, csv, collections, functools, itertools, typing
 3. NEVER import: subprocess, os.system, socket, requests, urllib, http, importlib, ctypes, sys, shutil, tempfile, pickle, exec, eval
 4. Load data: df = pd.read_parquet(os.environ['INPUT_FILE_PATH'])
-5. Save output: df_output.to_csv(os.environ['OUTPUT_FILE_PATH'], index=False)
+   CRITICAL: INPUT_FILE_PATH is ALWAYS a binary Parquet file. NEVER use pd.read_csv(), open(), or any other method to read it.
+   If you see a UnicodeDecodeError or CSV tokenization error when reading the input, it means the code used the wrong reader — fix it by using pd.read_parquet().
+5. Save output: df_output.to_csv(os.environ['OUTPUT_FILE_PATH'], index=False, encoding='utf-8')
 6. Keep all logic inside the existing main() function called under: if __name__ == '__main__': main()
 7. Generate ONLY the fixed Python code. No markdown fences. No explanations before or after.
 """

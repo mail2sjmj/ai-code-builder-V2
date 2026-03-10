@@ -64,7 +64,7 @@ def _read_metadata_dataframe(meta_file: UploadFile, content: bytes, settings: Se
         if suffix == ".xlsx":
             return pd.read_excel(io.BytesIO(content), header=0, engine="openpyxl")
         else:
-            return pd.read_csv(io.BytesIO(content), header=0)
+            return _read_csv_with_encoding_fallback(io.BytesIO(content), header=0)
     except Exception as exc:
         raise HTTPException(
             status_code=422,
@@ -506,7 +506,7 @@ async def generate_sample_csv_from_metadata(
         df.to_excel(output_path, index=False, engine="openpyxl")
     else:
         output_path = out_dir / f"sample_{sample_id}.csv"
-        df.to_csv(output_path, index=False)
+        df.to_csv(output_path, index=False, encoding="utf-8")
 
     stem = Path(meta_file.filename or "metadata").stem
     extension = "xlsx" if fmt == "xlsx" else "csv"
@@ -547,6 +547,23 @@ async def preview_metadata_file(
         dtypes,
         file_size,
     )
+
+
+def _read_csv_with_encoding_fallback(source: Any, **kwargs: Any) -> pd.DataFrame:
+    """
+    Read a CSV, trying UTF-8 first then falling back to Latin-1.
+    Handles files saved with Windows-1252/ISO-8859-1 encoding gracefully.
+    """
+    for enc in ("utf-8-sig", "latin-1"):
+        try:
+            return pd.read_csv(source, encoding=enc, on_bad_lines="skip", **kwargs)
+        except UnicodeDecodeError:
+            # Reset buffer position if source is a file-like object
+            if hasattr(source, "seek"):
+                source.seek(0)
+            continue
+    # Last resort: replace undecodable bytes
+    return pd.read_csv(source, encoding="utf-8", encoding_errors="replace", on_bad_lines="skip", **kwargs)
 
 
 async def parse_uploaded_file(
@@ -619,12 +636,12 @@ async def parse_uploaded_file(
             if meta_suffix == ".xlsx":
                 meta_df = pd.read_excel(io.BytesIO(meta_content), header=0, nrows=0, engine="openpyxl")
             else:
-                meta_df = pd.read_csv(io.BytesIO(meta_content), header=0, nrows=0)
+                meta_df = _read_csv_with_encoding_fallback(io.BytesIO(meta_content), header=0, nrows=0)
             meta_columns = list(meta_df.columns)
 
             # Read the data file with no header — every row is a data row.
             if suffix == ".csv":
-                df = pd.read_csv(file_path, header=None, on_bad_lines="skip")
+                df = _read_csv_with_encoding_fallback(file_path, header=None)
             else:
                 df = pd.read_excel(file_path, header=None, engine="openpyxl")
 
@@ -645,7 +662,7 @@ async def parse_uploaded_file(
             # header_row is 1-indexed from the user; pandas uses 0-indexed.
             pandas_header = (header_row - 1) if header_row is not None else 0
             if suffix == ".csv":
-                df = pd.read_csv(file_path, header=pandas_header, on_bad_lines="skip")
+                df = _read_csv_with_encoding_fallback(file_path, header=pandas_header)
             else:
                 df = pd.read_excel(file_path, header=pandas_header, engine="openpyxl")
     except HTTPException:
