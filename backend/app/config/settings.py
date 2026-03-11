@@ -112,6 +112,22 @@ class Settings(BaseSettings):
 
     # ── Validators ────────────────────────────────────────────────────────────
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalise_database_url(cls, v: object) -> str:
+        if not isinstance(v, str) or not v:
+            return ""
+        from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+        # Ensure asyncpg driver
+        v = (
+            v.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+             .replace("postgresql://", "postgresql+asyncpg://", 1)
+        )
+        # Strip params asyncpg doesn't understand (e.g. pgbouncer=true from Supabase)
+        parsed = urlparse(v)
+        params = {k: vals for k, vals in parse_qs(parsed.query).items() if k != "pgbouncer"}
+        return urlunparse(parsed._replace(query=urlencode({k: v[0] for k, v in params.items()})))
+
     @field_validator("ALLOWED_EXTENSIONS", mode="before")
     @classmethod
     def parse_extensions(cls, v: object) -> list[str]:
