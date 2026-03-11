@@ -69,6 +69,12 @@ class Settings(BaseSettings):
 
     SESSION_TTL_SECONDS: int = Field(default=3600, ge=60)
 
+    # ── Database ──────────────────────────────────────────────────────────────
+    DATABASE_URL: str = Field(
+        default="",
+        description="PostgreSQL connection URL (postgresql+asyncpg://user:pass@host/db). Required for metadata persistence.",
+    )
+
     # ── Sandbox Execution ─────────────────────────────────────────────────────
     # TEMP_DIR holds ephemeral per-execution artifacts (wrapper scripts, output CSVs).
     # Can point to a fast/local disk that is cleaned up more aggressively than INBOUND_DIR.

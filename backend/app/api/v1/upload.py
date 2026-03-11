@@ -1,6 +1,8 @@
 """File upload endpoint."""
 
 import logging
+import shutil
+from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -209,3 +211,37 @@ async def get_column_values(
         is_sample = True
 
     return ColumnValuesResponse(column=column, values=values, is_sample=is_sample)
+
+
+@router.delete(
+    "/session/{session_id}",
+    status_code=204,
+    summary="Close a session and clean up unpersisted data",
+    description=(
+        "Called by the frontend on window close. "
+        "If the session was never persisted to the database, the uploaded files are deleted. "
+        "If it was persisted, only the in-memory session is removed."
+    ),
+)
+async def close_session(
+    session_id: str,
+    session_store: SessionStore = Depends(deps_session_store),
+    settings: Settings = Depends(deps_settings),
+) -> None:
+    session = await session_store.delete_session(session_id)
+    if session is None:
+        # Already expired or never existed — nothing to do
+        return
+
+    if session.dataset_id is None:
+        # Never persisted → delete uploaded files from disk
+        session_dir = Path(settings.INBOUND_DIR) / session_id
+        if session_dir.exists():
+            shutil.rmtree(session_dir, ignore_errors=True)
+            logger.info("Deleted unpersisted session files: %s", session_dir)
+    else:
+        logger.info(
+            "Session %s closed; files retained (persisted as dataset %s)",
+            session_id,
+            session.dataset_id,
+        )

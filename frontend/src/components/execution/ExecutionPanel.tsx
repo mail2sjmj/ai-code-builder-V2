@@ -58,6 +58,7 @@ export function ExecutionPanel() {
         label,
         visibility: saveVisibility,
         overwrite,
+        session_id: sessionId ?? undefined,
       }
       await apiPost<SaveCodeLibraryResponse>('/code-library/save', payload)
       window.dispatchEvent(new Event('code-library-updated'))
@@ -70,6 +71,7 @@ export function ExecutionPanel() {
           instruction,
           label: instrLabel,
           overwrite: true,
+          session_id: sessionId ?? undefined,
         }
         await apiPost('/instructions-library/save', instrPayload)
         window.dispatchEvent(new Event('instructions-library-updated'))

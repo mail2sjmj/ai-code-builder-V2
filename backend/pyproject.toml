@@ -21,6 +21,9 @@ python-dotenv = ">=1.0.0"
 aiofiles = ">=23.0.0"
 python-magic-bin = { version = ">=0.4.14", markers = "sys_platform == 'win32'" }
 python-magic = { version = ">=0.4.27", markers = "sys_platform != 'win32'" }
+sqlalchemy = { version = ">=2.0.0", extras = ["asyncio"] }
+asyncpg = ">=0.29.0"
+alembic = ">=1.13.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0.0"

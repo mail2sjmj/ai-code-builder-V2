@@ -52,6 +52,7 @@ export interface SaveCodeLibraryRequest {
   label: string
   visibility: 'public' | 'private'
   overwrite?: boolean
+  session_id?: string
 }
 
 export interface SaveCodeLibraryResponse {
@@ -87,6 +88,7 @@ export interface SaveInstructionLibraryRequest {
   instruction: string
   label: string
   overwrite?: boolean
+  session_id?: string
 }
 
 export interface SaveInstructionLibraryResponse {
