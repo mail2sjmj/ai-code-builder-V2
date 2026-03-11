@@ -1,8 +1,11 @@
 """Instructions library APIs."""
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
 
-from app.api.dependencies import deps_settings
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.dependencies import deps_db, deps_session_store, deps_settings
 from app.config.settings import Settings
 from app.schemas.instructions_library import (
     InstructionLibraryItem,
@@ -10,12 +13,16 @@ from app.schemas.instructions_library import (
     SaveInstructionRequest,
     SaveInstructionResponse,
 )
+from app.services.dataset_metadata_service import persist_dataset_metadata
 from app.services.instructions_library_service import (
     delete_instruction_from_library,
     get_instruction_text,
     list_library_instructions,
     save_instruction_to_library,
 )
+from app.session.session_store import SessionStore
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Instructions Library"])
 
@@ -28,6 +35,8 @@ router = APIRouter(tags=["Instructions Library"])
 async def save_instruction(
     body: SaveInstructionRequest,
     settings: Settings = Depends(deps_settings),
+    session_store: SessionStore = Depends(deps_session_store),
+    db: AsyncSession = Depends(deps_db),
 ) -> SaveInstructionResponse:
     try:
         filename = save_instruction_to_library(
@@ -38,6 +47,15 @@ async def save_instruction(
         )
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail={"error_code": "LABEL_EXISTS", "message": str(exc)})
+
+    if body.session_id and settings.DATABASE_URL:
+        session_data = await session_store.get_session(body.session_id)
+        if session_data:
+            try:
+                await persist_dataset_metadata(session_data, db)
+            except Exception:
+                logger.exception("Failed to persist dataset metadata for session %s", body.session_id)
+
     return SaveInstructionResponse(filename=filename)
 
 

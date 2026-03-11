@@ -12,6 +12,7 @@ class SaveCodeRequest(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     visibility: Literal["public", "private"]
     overwrite: bool = False
+    session_id: str | None = None  # if set, triggers dataset metadata persistence
 
 
 class SaveCodeResponse(BaseModel):

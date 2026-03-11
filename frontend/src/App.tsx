@@ -16,6 +16,7 @@ import { useExecutionStore } from '@/store/executionStore'
 import { useInstructionStore } from '@/store/instructionStore'
 import { useSessionStore } from '@/store/sessionStore'
 import { cn } from '@/lib/utils'
+import appConfig from '@/config/app.config'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -331,6 +332,18 @@ function CodeSidebar({ showCode, setShowCode }: CodeSidebarProps) {
 
 export default function App() {
   const [showCode, setShowCode] = useState(false)
+  const sessionId = useSessionStore((s) => s.sessionId)
+
+  useEffect(() => {
+    const handleUnload = () => {
+      if (!sessionId) return
+      const url = `${appConfig.api.baseUrl}${appConfig.api.prefix}/session/${sessionId}`
+      // fetch with keepalive ensures the request completes even as the page unloads
+      void fetch(url, { method: 'DELETE', keepalive: true })
+    }
+    window.addEventListener('beforeunload', handleUnload)
+    return () => window.removeEventListener('beforeunload', handleUnload)
+  }, [sessionId])
 
   return (
     <QueryClientProvider client={queryClient}>

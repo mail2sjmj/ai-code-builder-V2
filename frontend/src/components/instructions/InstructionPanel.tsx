@@ -58,6 +58,7 @@ export function InstructionPanel() {
         instruction: rawInstructions,
         label,
         overwrite,
+        session_id: sessionId ?? undefined,
       }
       await apiPost<SaveInstructionLibraryResponse>('/instructions-library/save', payload)
       window.dispatchEvent(new Event('instructions-library-updated'))

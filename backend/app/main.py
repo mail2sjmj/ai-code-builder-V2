@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from sqlalchemy import text
+
 from app.api.v1.router import router as v1_router
 from app.config.settings import Settings, get_settings
 from app.session.session_store import get_session_store
@@ -126,11 +128,27 @@ async def _session_cleanup_loop(settings: Settings, session_store) -> None:  # t
 
 # ── Application factory ───────────────────────────────────────────────────────
 
+async def _check_db_connection(settings: Settings) -> None:
+    """Test the database connection on startup. Logs a warning if unavailable."""
+    if not settings.DATABASE_URL:
+        logger.warning("DATABASE_URL is not set — dataset metadata persistence is disabled.")
+        return
+    try:
+        from app.db.engine import _get_engine
+        eng, _ = _get_engine()
+        async with eng.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("Database connection verified: %s", settings.DATABASE_URL.split("@")[-1])
+    except Exception as exc:
+        logger.error("Database connection failed: %s — metadata persistence unavailable.", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     settings = get_settings()
     _configure_logging(settings)
     _validate_startup(settings)
+    await _check_db_connection(settings)
     session_store = get_session_store()
     cleanup_task = asyncio.create_task(_session_cleanup_loop(settings, session_store))
     logger.info(

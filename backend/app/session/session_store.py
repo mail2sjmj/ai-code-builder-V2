@@ -39,6 +39,7 @@ class SessionData:
     dtypes: dict[str, str]   # column → pandas dtype string
     file_size_bytes: int
     execution_jobs: dict[str, ExecutionJob] = field(default_factory=dict)
+    dataset_id: Optional[str] = None  # set after metadata is persisted to DB; None = not yet persisted
 
 
 class SessionStore:
@@ -81,6 +82,14 @@ class SessionStore:
             if session:
                 return session.execution_jobs.get(job_id)
             return None
+
+    async def delete_session(self, session_id: str) -> Optional[SessionData]:
+        """Remove a session from the store and return it (or None if not found)."""
+        async with self._lock:
+            session = self._store.pop(session_id, None)
+            if session:
+                logger.info("Session deleted: %s", session_id)
+            return session
 
     async def cleanup_expired_sessions(self, ttl_seconds: int) -> int:
         """Remove sessions older than ttl_seconds. Returns count removed."""
